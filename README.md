@@ -2,7 +2,7 @@
 
 The official Terraform provider for [Keel](https://keelapi.com) — a permit-first AI governance and execution control plane.
 
-Keel sits between your application and AI providers (OpenAI, Anthropic, Google, xAI, Meta). Every request flows through: **auth → permit → firewall → routing → execution → accounting → audit**.
+Keel sits between your application and AI providers (OpenAI, Anthropic, Google, xAI, Meta).
 
 > **⚠️ Keel is currently in private beta.** You'll need a Keel account and API key to use this provider.
 > [Sign up for early access →](https://dashboard.keelapi.com/signup)
@@ -41,6 +41,17 @@ variable "keel_api_key" {
 | `api_key`  | `KEEL_API_KEY`      | —                           | Your Keel API key    |
 | `base_url` | `KEEL_BASE_URL`     | `https://api.keelapi.com`   | API base URL         |
 
+## Request Lifecycle
+
+When Keel processes AI requests for your project, it follows this high-level flow:
+
+- **Evaluate:** identity, policy, and budget constraints are checked
+- **Decide:** a permit decision is issued — allow, deny, or constrain
+- **Execute:** the provider call occurs only if permitted
+- **Record:** usage, cost, and governance events are captured
+
+Requests are only executed if explicitly permitted.
+
 ## Resources
 
 ### `keel_project`
@@ -75,7 +86,7 @@ resource "keel_api_key" "backend" {
 
 ### `keel_policy_rule`
 
-Define governance policies with conditions and actions (`allow`, `deny`, or `challenge`).
+Define governance policies with conditions and actions (`allow`, `deny`, or `constrain`).
 
 ```hcl
 resource "keel_policy_rule" "cost_cap" {
@@ -182,6 +193,17 @@ data "keel_usage_summary" "april" {
   start_date = "2026-04-01"
   end_date   = "2026-04-30"
 }
+```
+
+## Rate Limiting and Throttle Handling
+
+The provider's HTTP client automatically handles rate-limit throttling from the Keel API (HTTP 429 responses). When a 429 is received the client parses the `Retry-After` header (falling back to `retry_after_seconds` in the response body) and waits before retrying the request.
+
+By default the client retries once. You can configure up to 3 retries by setting `ThrottleRetries` on the client. After all retries are exhausted, a `ThrottledError` is returned containing `RetryAfterSeconds`, `PermitID`, and `ReasonCode`. Non-throttle errors (403, 404, etc.) are never retried.
+
+```go
+c := client.New(baseURL, apiKey)
+c.ThrottleRetries = 2 // retry up to 2 times on 429 (hard cap: 3)
 ```
 
 ## Building from Source

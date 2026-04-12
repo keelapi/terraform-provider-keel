@@ -25,10 +25,14 @@ type permitDataSourceModel struct {
 }
 
 type permitModel struct {
-	ID        types.String `tfsdk:"id"`
-	Decision  types.String `tfsdk:"decision"`
-	Reason    types.String `tfsdk:"reason"`
-	CreatedAt types.String `tfsdk:"created_at"`
+	ID            types.String `tfsdk:"id"`
+	Decision      types.String `tfsdk:"decision"`
+	Reason        types.String `tfsdk:"reason"`
+	ReasonCode    types.String `tfsdk:"reason_code"`
+	ReasonDetail  types.String `tfsdk:"reason_detail"`
+	OutcomeDetail types.String `tfsdk:"outcome_detail"`
+	Message       types.String `tfsdk:"message"`
+	CreatedAt     types.String `tfsdk:"created_at"`
 }
 
 func NewPermitDataSource() datasource.DataSource {
@@ -67,6 +71,22 @@ func (d *permitDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 						"reason": schema.StringAttribute{
 							Computed:    true,
 							Description: "Permit reason.",
+						},
+						"reason_code": schema.StringAttribute{
+							Computed:    true,
+							Description: "Dot-namespaced reason code (Shape D). Example: budget.daily_cap_exceeded.",
+						},
+						"reason_detail": schema.StringAttribute{
+							Computed:    true,
+							Description: "Structured reason detail as JSON string.",
+						},
+						"outcome_detail": schema.StringAttribute{
+							Computed:    true,
+							Description: "Structured outcome detail as JSON string (e.g. retry_after_seconds).",
+						},
+						"message": schema.StringAttribute{
+							Computed:    true,
+							Description: "Human-readable message from the permit decision.",
 						},
 						"created_at": schema.StringAttribute{
 							Computed:    true,
@@ -119,10 +139,14 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 
 	// API returns permit_id, not id.
 	var apiResp []struct {
-		PermitID  string `json:"permit_id"`
-		Decision  string `json:"decision"`
-		Reason    string `json:"reason"`
-		CreatedAt string `json:"created_at"`
+		PermitID      string          `json:"permit_id"`
+		Decision      string          `json:"decision"`
+		Reason        string          `json:"reason"`
+		ReasonCode    string          `json:"reason_code"`
+		ReasonDetail  json.RawMessage `json:"reason_detail"`
+		OutcomeDetail json.RawMessage `json:"outcome_detail"`
+		Message       string          `json:"message"`
+		CreatedAt     string          `json:"created_at"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		resp.Diagnostics.AddError("Error parsing response", err.Error())
@@ -132,12 +156,30 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	config.Permits = make([]permitModel, len(apiResp))
 	for i, p := range apiResp {
 		config.Permits[i] = permitModel{
-			ID:        types.StringValue(p.PermitID),
-			Decision:  types.StringValue(p.Decision),
-			Reason:    types.StringValue(p.Reason),
-			CreatedAt: types.StringValue(p.CreatedAt),
+			ID:            types.StringValue(p.PermitID),
+			Decision:      types.StringValue(p.Decision),
+			Reason:        types.StringValue(p.Reason),
+			ReasonCode:    stringOrNull(p.ReasonCode),
+			ReasonDetail:  rawJSONOrNull(p.ReasonDetail),
+			OutcomeDetail: rawJSONOrNull(p.OutcomeDetail),
+			Message:       stringOrNull(p.Message),
+			CreatedAt:     types.StringValue(p.CreatedAt),
 		}
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, config)...)
+}
+
+func stringOrNull(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
+}
+
+func rawJSONOrNull(raw json.RawMessage) types.String {
+	if len(raw) == 0 || string(raw) == "null" {
+		return types.StringNull()
+	}
+	return types.StringValue(string(raw))
 }
