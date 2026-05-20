@@ -49,7 +49,7 @@ func (d *permitDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 		Attributes: map[string]schema.Attribute{
 			"decision": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by decision: \"allow\" or \"deny\".",
+				Description: "Filter by decision: \"allow\", \"deny\", or \"challenge\".",
 			},
 			"limit": schema.Int64Attribute{
 				Optional:    true,
@@ -137,26 +137,28 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
-	// API returns permit_id, not id.
-	var apiResp []struct {
-		PermitID      string          `json:"permit_id"`
-		Decision      string          `json:"decision"`
-		Reason        string          `json:"reason"`
-		ReasonCode    string          `json:"reason_code"`
-		ReasonDetail  json.RawMessage `json:"reason_detail"`
-		OutcomeDetail json.RawMessage `json:"outcome_detail"`
-		Message       string          `json:"message"`
-		CreatedAt     string          `json:"created_at"`
+	var apiResp struct {
+		Items []struct {
+			ID            string          `json:"id"`
+			Decision      string          `json:"decision"`
+			Reason        string          `json:"reason"`
+			ReasonCode    string          `json:"reason_code"`
+			ReasonDetail  json.RawMessage `json:"reason_detail"`
+			OutcomeDetail json.RawMessage `json:"outcome_detail"`
+			Message       string          `json:"message"`
+			CreatedAt     string          `json:"created_at"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		resp.Diagnostics.AddError("Error parsing response", err.Error())
 		return
 	}
 
-	config.Permits = make([]permitModel, len(apiResp))
-	for i, p := range apiResp {
+	config.Permits = make([]permitModel, len(apiResp.Items))
+	for i, p := range apiResp.Items {
 		config.Permits[i] = permitModel{
-			ID:            types.StringValue(p.PermitID),
+			ID:            types.StringValue(p.ID),
 			Decision:      types.StringValue(p.Decision),
 			Reason:        types.StringValue(p.Reason),
 			ReasonCode:    stringOrNull(p.ReasonCode),

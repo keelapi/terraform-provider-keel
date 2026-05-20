@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -15,4 +16,18 @@ var testAccProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServe
 func TestProviderSchema(t *testing.T) {
 	// Validates the provider schema compiles and is valid
 	_ = testAccProtoV6ProviderFactories
+}
+
+func TestProviderAPIKeyOnlySurface(t *testing.T) {
+	p := provider.New("test")()
+
+	resources := p.Resources(context.Background())
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 API-key-backed resource, got %d", len(resources))
+	}
+
+	dataSources := p.DataSources(context.Background())
+	if len(dataSources) != 1 {
+		t.Fatalf("expected 1 API-key-backed data source, got %d", len(dataSources))
+	}
 }

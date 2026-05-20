@@ -4,6 +4,8 @@ The official Terraform provider for [Keel](https://keelapi.com) — a permit-fir
 
 Keel sits between your application and AI providers (OpenAI, Anthropic, Google, xAI, Meta).
 
+Keel is built and published by Keel API, Inc.
+
 > **⚠️ Keel is currently in private beta.** You'll need a Keel account and API key to use this provider.
 > [Sign up for early access →](https://dashboard.keelapi.com/signup)
 
@@ -54,123 +56,23 @@ Requests are only executed if explicitly permitted.
 
 ## Resources
 
-### `keel_project`
+This provider is currently API-key-only. It only exposes endpoints that can be managed with a Keel API key.
 
-Manage an AI project with default provider settings, budget limits, and rate limits.
-
-```hcl
-resource "keel_project" "production" {
-  name        = "production-api"
-  description = "Production AI services"
-
-  settings {
-    default_provider = "openai"
-    default_model    = "gpt-4o"
-    budget_limit_usd = 1000.00
-    rate_limit_rpm   = 600
-  }
-}
-```
+Dashboard/user-authenticated surfaces such as projects, policies, budget envelopes, routing policies, and provider keys are intentionally not registered in this mode.
 
 ### `keel_api_key`
 
-Create API keys scoped to a project. Keys are immutable — any change triggers replacement.
+Create API keys for the project associated with the provider API key. The provider API key must have admin scope. Keys are immutable — any change triggers replacement. Deletion revokes the key.
 
 ```hcl
 resource "keel_api_key" "backend" {
-  project_id = keel_project.production.id
-  name       = "backend-service"
-  scope      = "project"
-}
-```
-
-### `keel_policy_rule`
-
-Define governance policies with conditions and actions (`allow`, `deny`, or `constrain`).
-
-```hcl
-resource "keel_policy_rule" "cost_cap" {
-  name     = "daily-cost-cap"
-  priority = 10
-
-  condition {
-    field    = "resource.attributes.estimated_cost_usd"
-    operator = "greater_than"
-    value    = "50.00"
-  }
-
-  action  = "deny"
-  reason  = "Single request cost exceeds $50 daily cap"
-  enabled = true
-}
-```
-
-### `keel_budget_envelope`
-
-Set budget controls per project with alert thresholds and hard caps.
-
-```hcl
-resource "keel_budget_envelope" "q2_budget" {
-  project_id   = keel_project.production.id
-  name         = "Q2-2026-AI-Budget"
-  amount_usd   = 10000.00
-  period       = "monthly"
-  alert_at_pct = [50, 75, 90]
-  hard_cap     = true
-}
-```
-
-### `keel_routing_config`
-
-Configure multi-provider AI model routing with weights and priorities.
-
-```hcl
-resource "keel_routing_config" "multi_provider" {
-  project_id = keel_project.production.id
-
-  route {
-    provider = "openai"
-    model    = "gpt-4o"
-    weight   = 70
-    priority = 1
-  }
-
-  route {
-    provider = "anthropic"
-    model    = "claude-3-5-sonnet"
-    weight   = 30
-    priority = 2
-  }
-
-  fallback_provider = "openai"
-  fallback_model    = "gpt-4o-mini"
-}
-```
-
-### `keel_provider_key`
-
-Bring your own API keys for upstream AI providers (`openai`, `anthropic`, `google`, `xai`, `meta`).
-
-```hcl
-resource "keel_provider_key" "openai_prod" {
-  project_id = keel_project.production.id
-  provider   = "openai"
-  key_value  = var.openai_api_key
-  enabled    = true
+  name        = "backend-service"
+  description = "Key for the backend service"
+  scope       = "client" # admin, client, or approval
 }
 ```
 
 ## Data Sources
-
-### `keel_project`
-
-Look up an existing project by ID.
-
-```hcl
-data "keel_project" "existing" {
-  id = "proj_abc123"
-}
-```
 
 ### `keel_permit`
 
@@ -180,18 +82,6 @@ Query AI request permits with optional filtering.
 data "keel_permit" "recent_denials" {
   decision = "deny"
   limit    = 50
-}
-```
-
-### `keel_usage_summary`
-
-Get usage metrics (cost, requests, tokens) for a project over a date range.
-
-```hcl
-data "keel_usage_summary" "april" {
-  project_id = keel_project.production.id
-  start_date = "2026-04-01"
-  end_date   = "2026-04-30"
 }
 ```
 

@@ -3,8 +3,12 @@ package resources
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -21,14 +25,18 @@ type apiKeyResource struct {
 }
 
 type apiKeyResourceModel struct {
-	ID        types.String `tfsdk:"id"`
-	ProjectID types.String `tfsdk:"project_id"`
-	Name      types.String `tfsdk:"name"`
-	Scope     types.String `tfsdk:"scope"`
-	Prefix    types.String `tfsdk:"prefix"`
-	RawKey    types.String `tfsdk:"raw_key"`
-	CreatedAt types.String `tfsdk:"created_at"`
-	Status    types.String `tfsdk:"status"`
+	ID          types.String `tfsdk:"id"`
+	ProjectID   types.String `tfsdk:"project_id"`
+	Name        types.String `tfsdk:"name"`
+	Description types.String `tfsdk:"description"`
+	Scope       types.String `tfsdk:"scope"`
+	Prefix      types.String `tfsdk:"prefix"`
+	RawKey      types.String `tfsdk:"raw_key"`
+	CreatedAt   types.String `tfsdk:"created_at"`
+	RevokedAt   types.String `tfsdk:"revoked_at"`
+	LastUsedAt  types.String `tfsdk:"last_used_at"`
+	ExpiresAt   types.String `tfsdk:"expires_at"`
+	Status      types.String `tfsdk:"status"`
 }
 
 func NewAPIKeyResource() resource.Resource {
@@ -51,10 +59,10 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"project_id": schema.StringAttribute{
-				Required:    true,
-				Description: "Project ID this key belongs to.",
+				Computed:    true,
+				Description: "Project ID this key belongs to. Derived from the API key used to configure the provider.",
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -64,11 +72,18 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"description": schema.StringAttribute{
+				Optional:    true,
+				Description: "API key description.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 			"scope": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("project"),
-				Description: "Key scope. Default: \"project\".",
+				Default:     stringdefault.StaticString("client"),
+				Description: "Key scope: \"admin\", \"client\", or \"approval\". Default: \"client\".",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
 				},
@@ -95,9 +110,26 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"revoked_at": schema.StringAttribute{
+				Computed:    true,
+				Description: "Revocation timestamp, if the key has been revoked.",
+			},
+			"last_used_at": schema.StringAttribute{
+				Computed:    true,
+				Description: "Last-used timestamp, if the key has been used.",
+			},
+			"expires_at": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Expiration timestamp, if configured.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"status": schema.StringAttribute{
 				Computed:    true,
-				Description: "Key status.",
+				Description: "Derived key status: \"active\" or \"revoked\".",
 			},
 		},
 	}
@@ -116,14 +148,29 @@ func (r *apiKeyResource) Configure(_ context.Context, req resource.ConfigureRequ
 }
 
 type apiKeyAPIModel struct {
-	ID        string `json:"id,omitempty"`
-	ProjectID string `json:"project_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Scope     string `json:"scope,omitempty"`
-	Prefix    string `json:"prefix,omitempty"`
-	RawKey    string `json:"raw_key,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
-	Status    string `json:"status,omitempty"`
+	ID          string `json:"id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	Prefix      string `json:"prefix,omitempty"`
+	RawKey      string `json:"raw_key,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	RevokedAt   string `json:"revoked_at,omitempty"`
+	LastUsedAt  string `json:"last_used_at,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+}
+
+type apiKeyCreateRequest struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Scope       string `json:"scope,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+}
+
+type apiKeyListResponse struct {
+	Items      []apiKeyAPIModel `json:"items"`
+	NextCursor string           `json:"next_cursor"`
 }
 
 func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -133,12 +180,30 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	apiReq := apiKeyAPIModel{
-		Name:  plan.Name.ValueString(),
-		Scope: plan.Scope.ValueString(),
+	scope := plan.Scope.ValueString()
+	if !validAPIKeyScope(scope) {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("scope"),
+			"Invalid API Key Scope",
+			"Scope must be one of: admin, client, approval.",
+		)
+		return
 	}
 
-	body, err := r.client.Post(ctx, fmt.Sprintf("/v1/projects/%s/api-keys", plan.ProjectID.ValueString()), apiReq)
+	apiReq := apiKeyCreateRequest{
+		Scope: scope,
+	}
+	if !plan.Name.IsNull() && !plan.Name.IsUnknown() {
+		apiReq.Name = plan.Name.ValueString()
+	}
+	if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
+		apiReq.Description = plan.Description.ValueString()
+	}
+	if !plan.ExpiresAt.IsNull() && !plan.ExpiresAt.IsUnknown() {
+		apiReq.ExpiresAt = plan.ExpiresAt.ValueString()
+	}
+
+	body, err := r.client.Post(ctx, "/v1/api-keys", apiReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating API key", err.Error())
 		return
@@ -150,11 +215,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	plan.ID = types.StringValue(apiResp.ID)
-	plan.Prefix = types.StringValue(apiResp.Prefix)
-	plan.RawKey = types.StringValue(apiResp.RawKey)
-	plan.CreatedAt = types.StringValue(apiResp.CreatedAt)
-	plan.Status = types.StringValue(apiResp.Status)
+	applyAPIKeyToState(&plan, apiResp, true)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 }
@@ -167,37 +228,19 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	}
 
 	// No single-key GET endpoint — use the list endpoint and filter by ID.
-	body, err := r.client.Get(ctx, fmt.Sprintf("/v1/projects/%s/api-keys", state.ProjectID.ValueString()))
+	found, err := r.findAPIKey(ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Error listing API keys", err.Error())
 		return
 	}
 
-	var keys []apiKeyAPIModel
-	if err := json.Unmarshal(body, &keys); err != nil {
-		resp.Diagnostics.AddError("Error parsing response", err.Error())
-		return
-	}
-
-	var found *apiKeyAPIModel
-	for _, k := range keys {
-		if k.ID == state.ID.ValueString() {
-			found = &k
-			break
-		}
-	}
-
-	if found == nil {
+	if found == nil || found.RevokedAt != "" {
 		// Key no longer exists (revoked or deleted).
 		resp.State.RemoveResource(ctx)
 		return
 	}
 
-	state.Name = types.StringValue(found.Name)
-	state.Scope = types.StringValue(found.Scope)
-	state.Prefix = types.StringValue(found.Prefix)
-	state.Status = types.StringValue(found.Status)
-	// raw_key is NOT returned on list — keep state value
+	applyAPIKeyToState(&state, *found, false)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
 }
@@ -218,8 +261,82 @@ func (r *apiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	// API uses POST revoke, not DELETE.
-	_, err := r.client.Post(ctx, fmt.Sprintf("/v1/projects/%s/api-keys/%s/revoke", state.ProjectID.ValueString(), state.ID.ValueString()), nil)
+	_, err := r.client.Post(ctx, fmt.Sprintf("/v1/api-keys/%s/revoke", state.ID.ValueString()), nil)
 	if err != nil {
+		var apiErr *client.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return
+		}
 		resp.Diagnostics.AddError("Error revoking API key", err.Error())
+	}
+}
+
+func (r *apiKeyResource) findAPIKey(ctx context.Context, id string) (*apiKeyAPIModel, error) {
+	cursor := ""
+	for {
+		params := url.Values{}
+		params.Set("status", "all")
+		params.Set("limit", "200")
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
+
+		body, err := r.client.Get(ctx, "/v1/api-keys?"+params.Encode())
+		if err != nil {
+			return nil, err
+		}
+
+		var apiResp apiKeyListResponse
+		if err := json.Unmarshal(body, &apiResp); err != nil {
+			return nil, fmt.Errorf("parsing API key list response: %w", err)
+		}
+
+		for i := range apiResp.Items {
+			if apiResp.Items[i].ID == id {
+				return &apiResp.Items[i], nil
+			}
+		}
+
+		if apiResp.NextCursor == "" {
+			return nil, nil
+		}
+		cursor = apiResp.NextCursor
+	}
+}
+
+func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeRawKey bool) {
+	state.ID = stringValueOrNull(key.ID)
+	state.ProjectID = stringValueOrNull(key.ProjectID)
+	state.Name = stringValueOrNull(key.Name)
+	state.Description = stringValueOrNull(key.Description)
+	state.Scope = stringValueOrNull(key.Scope)
+	state.Prefix = stringValueOrNull(key.Prefix)
+	state.CreatedAt = stringValueOrNull(key.CreatedAt)
+	state.RevokedAt = stringValueOrNull(key.RevokedAt)
+	state.LastUsedAt = stringValueOrNull(key.LastUsedAt)
+	state.ExpiresAt = stringValueOrNull(key.ExpiresAt)
+	if key.RevokedAt != "" {
+		state.Status = types.StringValue("revoked")
+	} else {
+		state.Status = types.StringValue("active")
+	}
+	if includeRawKey {
+		state.RawKey = stringValueOrNull(key.RawKey)
+	}
+}
+
+func stringValueOrNull(s string) types.String {
+	if s == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(s)
+}
+
+func validAPIKeyScope(scope string) bool {
+	switch scope {
+	case "admin", "client", "approval":
+		return true
+	default:
+		return false
 	}
 }

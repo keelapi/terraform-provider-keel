@@ -40,7 +40,7 @@ func (p *keelProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 
 func (p *keelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage Keel AI governance resources.",
+		Description: "Manage Keel API-key-backed resources.",
 		Attributes: map[string]schema.Attribute{
 			"base_url": schema.StringAttribute{
 				Optional:    true,
@@ -91,19 +91,12 @@ func (p *keelProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 
 func (p *keelProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		resources.NewProjectResource,
 		resources.NewAPIKeyResource,
-		resources.NewPolicyRuleResource,
-		resources.NewBudgetEnvelopeResource,
-		resources.NewRoutingConfigResource,
-		resources.NewProviderKeyResource,
 	}
 }
 
 func (p *keelProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
-		datasources.NewProjectDataSource,
 		datasources.NewPermitDataSource,
-		datasources.NewUsageSummaryDataSource,
 	}
 }
