@@ -143,6 +143,22 @@ make install
 
 This builds the provider and installs it to your local Terraform plugin directory.
 
+## Releases
+
+Releases are tag-driven through GitHub Actions. After the GitHub repository is
+renamed to `terraform-provider-keel` and the Terraform Registry signing key and
+GitHub secrets are configured, push a semantic version tag such as `v0.2.0`:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The release workflow builds the provider for the Terraform Registry platforms,
+uploads the registry manifest, writes SHA256 checksums, and signs the checksum
+file with the configured GPG key. See [docs/PUBLISHING.md](docs/PUBLISHING.md)
+for the one-time setup and release checklist.
+
 ## Development
 
 ```sh
