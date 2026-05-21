@@ -18,12 +18,12 @@ func TestProviderSchema(t *testing.T) {
 	_ = testAccProtoV6ProviderFactories
 }
 
-func TestProviderAPIKeyOnlySurface(t *testing.T) {
+func TestProviderV1MinimalSurface(t *testing.T) {
 	p := provider.New("test")()
 
 	resources := p.Resources(context.Background())
-	if len(resources) != 1 {
-		t.Fatalf("expected 1 API-key-backed resource, got %d", len(resources))
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 API-key-backed resources, got %d", len(resources))
 	}
 
 	dataSources := p.DataSources(context.Background())

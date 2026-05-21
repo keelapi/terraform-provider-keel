@@ -92,6 +92,7 @@ func (p *keelProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 func (p *keelProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		resources.NewAPIKeyResource,
+		resources.NewOrganizationMemberResource,
 	}
 }
 

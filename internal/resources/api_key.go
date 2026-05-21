@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -19,6 +20,7 @@ import (
 )
 
 var _ resource.Resource = &apiKeyResource{}
+var _ resource.ResourceWithImportState = &apiKeyResource{}
 
 type apiKeyResource struct {
 	client *client.Client
@@ -30,6 +32,7 @@ type apiKeyResourceModel struct {
 	Name        types.String `tfsdk:"name"`
 	Description types.String `tfsdk:"description"`
 	Scope       types.String `tfsdk:"scope"`
+	CreatedBy   types.String `tfsdk:"created_by"`
 	Prefix      types.String `tfsdk:"prefix"`
 	RawKey      types.String `tfsdk:"raw_key"`
 	CreatedAt   types.String `tfsdk:"created_at"`
@@ -59,10 +62,12 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"project_id": schema.StringAttribute{
+				Optional:    true,
 				Computed:    true,
-				Description: "Project ID this key belongs to. Derived from the API key used to configure the provider.",
+				Description: "Project ID this key belongs to. When omitted, the provider uses /v1/api-keys and the Keel API derives the project from the provider API key.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -82,10 +87,17 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"scope": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString("client"),
-				Description: "Key scope: \"admin\", \"client\", or \"approval\". Default: \"client\".",
+				Default:     stringdefault.StaticString("admin"),
+				Description: "Key scope: \"admin\", \"client\", or \"approval\". Default: \"admin\".",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"created_by": schema.StringAttribute{
+				Computed:    true,
+				Description: "User ID that created the API key, if available.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"prefix": schema.StringAttribute{
@@ -153,6 +165,7 @@ type apiKeyAPIModel struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Scope       string `json:"scope,omitempty"`
+	CreatedBy   string `json:"created_by,omitempty"`
 	Prefix      string `json:"prefix,omitempty"`
 	RawKey      string `json:"raw_key,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
@@ -190,6 +203,19 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
+	projectID := ""
+	if !plan.ProjectID.IsNull() && !plan.ProjectID.IsUnknown() {
+		projectID = plan.ProjectID.ValueString()
+	}
+	if projectID != "" && scope == "approval" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("scope"),
+			"Invalid Project API Key Scope",
+			"Project-scoped API keys support admin and client scopes. Omit project_id to use /v1/api-keys with approval scope.",
+		)
+		return
+	}
+
 	apiReq := apiKeyCreateRequest{
 		Scope: scope,
 	}
@@ -203,7 +229,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		apiReq.ExpiresAt = plan.ExpiresAt.ValueString()
 	}
 
-	body, err := r.client.Post(ctx, "/v1/api-keys", apiReq)
+	body, err := r.client.Post(ctx, apiKeyCollectionPath(projectID), apiReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating API key", err.Error())
 		return
@@ -227,8 +253,13 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
+	projectID := ""
+	if !state.ProjectID.IsNull() && !state.ProjectID.IsUnknown() {
+		projectID = state.ProjectID.ValueString()
+	}
+
 	// No single-key GET endpoint — use the list endpoint and filter by ID.
-	found, err := r.findAPIKey(ctx, state.ID.ValueString())
+	found, err := r.findAPIKey(ctx, state.ID.ValueString(), projectID)
 	if err != nil {
 		resp.Diagnostics.AddError("Error listing API keys", err.Error())
 		return
@@ -261,7 +292,12 @@ func (r *apiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 
 	// API uses POST revoke, not DELETE.
-	_, err := r.client.Post(ctx, fmt.Sprintf("/v1/api-keys/%s/revoke", state.ID.ValueString()), nil)
+	projectID := ""
+	if !state.ProjectID.IsNull() && !state.ProjectID.IsUnknown() {
+		projectID = state.ProjectID.ValueString()
+	}
+
+	_, err := r.client.Post(ctx, apiKeyRevokePath(projectID, state.ID.ValueString()), nil)
 	if err != nil {
 		var apiErr *client.APIError
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
@@ -271,7 +307,30 @@ func (r *apiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 	}
 }
 
-func (r *apiKeyResource) findAPIKey(ctx context.Context, id string) (*apiKeyAPIModel, error) {
+func (r *apiKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	parts := strings.Split(req.ID, "/")
+	switch len(parts) {
+	case 1:
+		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+	case 2:
+		if parts[0] == "" || parts[1] == "" {
+			resp.Diagnostics.AddError(
+				"Invalid API Key Import ID",
+				"Import ID must be either key_id or project_id/key_id.",
+			)
+			return
+		}
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
+		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
+	default:
+		resp.Diagnostics.AddError(
+			"Invalid API Key Import ID",
+			"Import ID must be either key_id or project_id/key_id.",
+		)
+	}
+}
+
+func (r *apiKeyResource) findAPIKey(ctx context.Context, id string, projectID string) (*apiKeyAPIModel, error) {
 	cursor := ""
 	for {
 		params := url.Values{}
@@ -281,7 +340,7 @@ func (r *apiKeyResource) findAPIKey(ctx context.Context, id string) (*apiKeyAPIM
 			params.Set("cursor", cursor)
 		}
 
-		body, err := r.client.Get(ctx, "/v1/api-keys?"+params.Encode())
+		body, err := r.client.Get(ctx, apiKeyCollectionPath(projectID)+"?"+params.Encode())
 		if err != nil {
 			return nil, err
 		}
@@ -310,6 +369,7 @@ func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeR
 	state.Name = stringValueOrNull(key.Name)
 	state.Description = stringValueOrNull(key.Description)
 	state.Scope = stringValueOrNull(key.Scope)
+	state.CreatedBy = stringValueOrNull(key.CreatedBy)
 	state.Prefix = stringValueOrNull(key.Prefix)
 	state.CreatedAt = stringValueOrNull(key.CreatedAt)
 	state.RevokedAt = stringValueOrNull(key.RevokedAt)
@@ -323,6 +383,20 @@ func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeR
 	if includeRawKey {
 		state.RawKey = stringValueOrNull(key.RawKey)
 	}
+}
+
+func apiKeyCollectionPath(projectID string) string {
+	if projectID == "" {
+		return "/v1/api-keys"
+	}
+	return fmt.Sprintf("/v1/projects/%s/api-keys", url.PathEscape(projectID))
+}
+
+func apiKeyRevokePath(projectID, keyID string) string {
+	if projectID == "" {
+		return fmt.Sprintf("/v1/api-keys/%s/revoke", url.PathEscape(keyID))
+	}
+	return fmt.Sprintf("/v1/projects/%s/api-keys/%s/revoke", url.PathEscape(projectID), url.PathEscape(keyID))
 }
 
 func stringValueOrNull(s string) types.String {

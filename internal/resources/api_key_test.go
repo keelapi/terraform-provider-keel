@@ -8,6 +8,7 @@ import (
 
 func TestAccAPIKeyResource_basic(t *testing.T) {
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { testAccPreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
@@ -27,6 +28,12 @@ resource "keel_api_key" "test" {
 					resource.TestCheckResourceAttrSet("keel_api_key.test", "prefix"),
 					resource.TestCheckResourceAttrSet("keel_api_key.test", "raw_key"),
 				),
+			},
+			{
+				ResourceName:            "keel_api_key.test",
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"raw_key"},
 			},
 		},
 	})
