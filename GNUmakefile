@@ -13,7 +13,9 @@ test:
 testacc:
 	TF_ACC=1 go test ./... -v
 
-docs:
-	go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
+generate-docs:
+	cd tools && go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs generate --provider-dir=.. --provider-name=keel
 
-.PHONY: default build install test testacc docs
+docs: generate-docs
+
+.PHONY: default build install test testacc generate-docs docs
