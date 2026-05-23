@@ -169,9 +169,11 @@ make test
 # KEEL_TEST_ORG_ID and KEEL_TEST_USER_ID)
 make testacc
 
-# Generate documentation
-make docs
+# Generate Terraform Registry documentation from templates/ and examples/
+make generate-docs
 ```
+
+`make docs` remains available as an alias for `make generate-docs`.
 
 ## License
 
