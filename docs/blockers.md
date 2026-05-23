@@ -1,5 +1,7 @@
 # v1.0 Deferred Resource API Blockers
 
+> Internal tracker. This file is not part of the Terraform Registry-published provider, resource, or data source reference.
+
 Keel Terraform v1.0 ships only the resources backed by the public keel-api surface available today.
 
 ## `keel_workspace`
