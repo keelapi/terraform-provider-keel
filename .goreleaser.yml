@@ -64,6 +64,16 @@ signs:
       - "--output"
       - "${signature}"
       - "--detach-sign"
+      # --pinentry-mode loopback + --passphrase: required in GitHub Actions /
+      # any non-TTY context. Without these, gpg2 tries to prompt via pinentry
+      # and fails with "Inappropriate ioctl for device" even when gpg-agent
+      # has the passphrase cached. Belt-and-suspenders: pinentry-mode loopback
+      # tells gpg2 to skip TTY prompting; --passphrase reads from env directly.
+      # The PASSPHRASE env var is passed by .github/workflows/release.yml.
+      - "--pinentry-mode"
+      - "loopback"
+      - "--passphrase"
+      - "{{ .Env.PASSPHRASE }}"
       - "${artifact}"
 
 release:

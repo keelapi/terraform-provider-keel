@@ -43,3 +43,8 @@ jobs:
           # GitHub sets the GITHUB_TOKEN secret automatically.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          # PASSPHRASE: consumed by gpg2 via --pinentry-mode loopback --passphrase
+          # in .goreleaser.yml signs section. Without it, the gpg2 signing step
+          # fails with "Inappropriate ioctl for device" in GitHub Actions (no
+          # TTY available for pinentry prompts).
+          PASSPHRASE: ${{ secrets.PASSPHRASE }}
