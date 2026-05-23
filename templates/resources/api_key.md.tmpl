@@ -1,0 +1,26 @@
+---
+page_title: "keel_api_key Resource - terraform-provider-keel"
+description: |-
+  Manages a Keel API key.
+---
+
+# keel_api_key (Resource)
+
+{{ .Description | trimspace }}
+
+Use this resource to create API keys for the project associated with the provider API key. The provider API key must have permission to create and revoke keys. API keys are immutable after creation; changing configurable fields forces replacement, and deletion revokes the key.
+
+## Example Usage
+
+{{tffile "examples/resources/keel_api_key/main.tf"}}
+
+## Import
+
+Import with `key_id` or `project_id/key_id`.
+
+```shell
+terraform import keel_api_key.backend key_id
+terraform import keel_api_key.backend project_id/key_id
+```
+
+{{ .SchemaMarkdown | trimspace }}
