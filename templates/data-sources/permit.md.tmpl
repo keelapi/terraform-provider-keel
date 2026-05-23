@@ -1,0 +1,17 @@
+---
+page_title: "keel_permit Data Source - terraform-provider-keel"
+description: |-
+  Query Keel permits.
+---
+
+# keel_permit (Data Source)
+
+{{ .Description | trimspace }}
+
+Use this data source to read recent Keel permit decisions scoped by the provider API key. Optional filters can narrow results by decision and limit the number of returned permits.
+
+## Example Usage
+
+{{tffile "examples/data-sources/keel_permit/main.tf"}}
+
+{{ .SchemaMarkdown | trimspace }}

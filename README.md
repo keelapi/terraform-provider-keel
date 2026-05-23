@@ -35,7 +35,7 @@ terraform {
   required_providers {
     keel = {
       source  = "keelapi/keel"
-      version = "~> 0.1"
+      version = "~> 1.0"
     }
   }
 }
@@ -145,19 +145,19 @@ This builds the provider and installs it to your local Terraform plugin director
 
 ## Releases
 
-Releases are tag-driven through GitHub Actions. After the GitHub repository is
-renamed to `terraform-provider-keel` and the Terraform Registry signing key and
-GitHub secrets are configured, push a semantic version tag such as `v0.2.0`:
+Releases are tag-driven through GitHub Actions. After the Terraform Registry
+signing key, GitHub secrets, Registry namespace, and provider listing are
+configured, push the next semantic version tag such as `v1.0.1`:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 The release workflow builds the provider for the Terraform Registry platforms,
 uploads the registry manifest, writes SHA256 checksums, and signs the checksum
-file with the configured GPG key. See [docs/PUBLISHING.md](docs/PUBLISHING.md)
-for the one-time setup and release checklist.
+file with the configured GPG key. See [PUBLISHING.md](PUBLISHING.md) for the
+one-time setup and release checklist.
 
 ## Development
 
@@ -169,9 +169,11 @@ make test
 # KEEL_TEST_ORG_ID and KEEL_TEST_USER_ID)
 make testacc
 
-# Generate documentation
-make docs
+# Generate Terraform Registry documentation from templates/ and examples/
+make generate-docs
 ```
+
+`make docs` remains available as an alias for `make generate-docs`.
 
 ## License
 

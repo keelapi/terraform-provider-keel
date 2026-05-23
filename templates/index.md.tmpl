@@ -1,0 +1,19 @@
+---
+page_title: "Keel Provider"
+description: |-
+  The Keel provider manages API-key-backed Keel governance resources.
+---
+
+# Keel Provider
+
+Keel sits between your application and AI providers to govern requests before they reach model infrastructure. It evaluates identity, policy, budget, and operational constraints; decides whether a request is allowed, denied, or constrained; executes only permitted provider calls; and records usage, cost, and governance events.
+
+## Surface Position
+
+The OpenAPI specification is the canonical integration contract for Keel surfaces. Terraform is Keel's policy-as-code surface for managing governance resources, while first-class runtime SDKs serve application code. Use this provider for infrastructure-owned Keel configuration that benefits from review, drift detection, and repeatable rollout.
+
+## Example Usage
+
+{{tffile "examples/provider/provider.tf"}}
+
+{{ .SchemaMarkdown | trimspace }}
