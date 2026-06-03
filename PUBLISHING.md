@@ -1,6 +1,6 @@
 # Publishing
 
-This is the Christian-side checklist for publishing the `keelapi/keel`
+This is the maintainer-side checklist for publishing the `keelapi/keel`
 Terraform provider to the public Terraform Registry. Do not generate, export,
 commit, or upload signing key material from automation or from another person's
 machine.
@@ -35,7 +35,7 @@ the uploaded public key and first release logs can be checked against it.
 
 ## 1. Generate the GPG keypair
 
-Christian should perform this step locally on a trusted machine.
+The maintainer should perform this step locally on a trusted machine.
 
 ```sh
 gpg --full-generate-key
@@ -164,7 +164,7 @@ The release workflow will create the GitHub Release with:
 Do not modify or replace an already-published provider version. If a release
 asset is wrong after publication, cut a new SemVer patch tag.
 
-## Expected Christian hand-time
+## Expected maintainer hand-time
 
 Budget 30 to 60 minutes:
 
