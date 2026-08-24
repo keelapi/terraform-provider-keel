@@ -4,3 +4,6 @@ terraform-provider-keel
 *.tfstate.backup
 .terraform/
 
+# Release-signing private keys must never enter the repository. The exact
+# historical filename is listed so a public-key artifact can remain reviewable.
+terraform-provider-keel-private.asc

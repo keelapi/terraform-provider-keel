@@ -70,15 +70,21 @@ Export the public key for Terraform Registry upload:
 gpg --armor --export "$KEY_FINGERPRINT" > terraform-provider-keel-public.asc
 ```
 
-Export the private key for the GitHub Actions secret:
+Export the private key outside the repository with owner-only permissions:
 
 ```sh
-gpg --armor --export-secret-keys "$KEY_FINGERPRINT" > terraform-provider-keel-private.asc
+umask 077
+KEY_EXPORT_DIR="$(mktemp -d)"
+PRIVATE_KEY_FILE="$KEY_EXPORT_DIR/terraform-provider-keel-private.asc"
+gpg --armor --export-secret-keys "$KEY_FINGERPRINT" > "$PRIVATE_KEY_FILE"
 ```
 
-Treat `terraform-provider-keel-private.asc` as sensitive. Do not commit it. Do
-not send it in chat. Remove it after the GitHub secret is confirmed, unless
-Keel's internal key custody policy requires retaining a local encrypted copy.
+Treat `$PRIVATE_KEY_FILE` as sensitive. Do not copy it into the repository, add
+it to shell history, send it in chat, or print it to a terminal transcript. The
+repository ignores the historical filename and CI rejects tracked private-key
+armor, but those controls do not replace key custody. Remove the temporary
+export after the GitHub secret is confirmed unless Keel's approved key-custody
+policy requires retaining an encrypted offline copy.
 
 ## 2. Add GitHub Actions secrets
 
@@ -94,7 +100,7 @@ keelapi/terraform-provider-keel
 Add:
 
 - `GPG_PRIVATE_KEY`: the complete contents of
-  `terraform-provider-keel-private.asc`, including the
+  `$PRIVATE_KEY_FILE`, including the
   `-----BEGIN PGP PRIVATE KEY BLOCK-----` and
   `-----END PGP PRIVATE KEY BLOCK-----` lines.
 - `PASSPHRASE`: the key passphrase, if the key has one.
