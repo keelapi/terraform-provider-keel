@@ -63,7 +63,7 @@ func TestOrganizationMemberRoleValidatedAtPlan(t *testing.T) {
 			{
 				Config:      memberConfig(fake, "Member"),
 				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`value must be one of: "owner", "admin", "member", "viewer"`),
+				ExpectError: regexp.MustCompile(`must\s+be\s+one\s+of:\s+"owner",\s+"admin",\s+"member",\s+"viewer",\s+got:\s+"Member"`),
 			},
 		},
 	})
@@ -86,7 +86,7 @@ resource "keel_organization_member" "test" {
 }
 `, fakeOrgID, fakeMemberUserID),
 				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`API keys cannot manage organization membership`),
+				ExpectError: regexp.MustCompile(`API\s+keys\s+cannot\s+manage\s+organization\s+membership`),
 			},
 		},
 	})

@@ -1,0 +1,127 @@
+{
+ "items": [
+  {
+   "id": "397ff899-aeaa-46f2-8d01-ef756e109c34",
+   "project_id": "3c2d0ad7-4c42-477a-bdad-17a0855174ce",
+   "subject_type": "user",
+   "subject_id": "usr_4",
+   "action_name": "ai.generate.summary",
+   "resource_provider": "openai",
+   "resource_model": "gpt-4o-mini",
+   "decision": "deny",
+   "reason": "policy.rule_denied",
+   "outcome_kind": "decision",
+   "outcome_kind_classifier_version": "2026-09-21.1",
+   "legacy_representation_note": null,
+   "status": "evaluated",
+   "budgets_json": {
+    "window": "monthly"
+   },
+   "decision_details": {
+    "code": "policy.rule_denied",
+    "decision": "deny",
+    "policy_id": "starter_preset",
+    "policy_version": "1.0.0",
+    "reason": "Blocked by the production model rule."
+   },
+   "policy_id": "starter_preset",
+   "policy_version": "1.0.0",
+   "created_at": "2026-09-20T12:00:04"
+  },
+  {
+   "id": "47412cf9-1e4e-42be-b9ed-90fa31d6fcfd",
+   "project_id": "3c2d0ad7-4c42-477a-bdad-17a0855174ce",
+   "subject_type": "user",
+   "subject_id": "usr_3",
+   "action_name": "ai.generate.summary",
+   "resource_provider": "openai",
+   "resource_model": "gpt-4o-mini",
+   "decision": "throttle",
+   "reason": "budget.rate_limit_throttled",
+   "outcome_kind": "decision",
+   "outcome_kind_classifier_version": "2026-09-21.1",
+   "legacy_representation_note": null,
+   "status": "evaluated",
+   "budgets_json": {
+    "window": "monthly"
+   },
+   "decision_details": null,
+   "policy_id": "starter_preset",
+   "policy_version": "1.0.0",
+   "created_at": "2026-09-20T12:00:03"
+  },
+  {
+   "id": "9c370527-d541-4852-8a1a-8a34d8e62cc8",
+   "project_id": "3c2d0ad7-4c42-477a-bdad-17a0855174ce",
+   "subject_type": "user",
+   "subject_id": "usr_2",
+   "action_name": "ai.generate.summary",
+   "resource_provider": "openai",
+   "resource_model": "gpt-4o-mini",
+   "decision": "review",
+   "reason": "policy.review_required",
+   "outcome_kind": "decision",
+   "outcome_kind_classifier_version": "2026-09-21.1",
+   "legacy_representation_note": null,
+   "status": "evaluated",
+   "budgets_json": {
+    "window": "monthly"
+   },
+   "decision_details": null,
+   "policy_id": "starter_preset",
+   "policy_version": "1.0.0",
+   "created_at": "2026-09-20T12:00:02"
+  },
+  {
+   "id": "0f824306-7fd2-46cb-89b7-7a03baec5de7",
+   "project_id": "3c2d0ad7-4c42-477a-bdad-17a0855174ce",
+   "subject_type": "user",
+   "subject_id": "usr_1",
+   "action_name": "ai.generate.summary",
+   "resource_provider": "openai",
+   "resource_model": "gpt-4o-mini",
+   "decision": "deny",
+   "reason": "budget.daily_cap_exceeded",
+   "outcome_kind": "decision",
+   "outcome_kind_classifier_version": "2026-09-21.1",
+   "legacy_representation_note": null,
+   "status": "evaluated",
+   "budgets_json": {
+    "window": "monthly"
+   },
+   "decision_details": {
+    "code": "budget.daily_cap_exceeded",
+    "decision": "deny",
+    "policy_id": "starter_preset",
+    "policy_version": "1.0.0",
+    "reason": "Continue"
+   },
+   "policy_id": "starter_preset",
+   "policy_version": "1.0.0",
+   "created_at": "2026-09-20T12:00:01"
+  },
+  {
+   "id": "abb90673-0ed3-4160-b9d2-c1bcd89de308",
+   "project_id": "3c2d0ad7-4c42-477a-bdad-17a0855174ce",
+   "subject_type": "user",
+   "subject_id": "usr_0",
+   "action_name": "ai.generate.summary",
+   "resource_provider": "openai",
+   "resource_model": "gpt-4o-mini",
+   "decision": "allow",
+   "reason": "allowed",
+   "outcome_kind": "unclassified",
+   "outcome_kind_classifier_version": "2026-09-21.1",
+   "legacy_representation_note": null,
+   "status": "expired",
+   "budgets_json": {
+    "window": "monthly"
+   },
+   "decision_details": null,
+   "policy_id": "starter_preset",
+   "policy_version": "1.0.0",
+   "created_at": "2026-09-20T12:00:00"
+  }
+ ],
+ "next_cursor": null
+}

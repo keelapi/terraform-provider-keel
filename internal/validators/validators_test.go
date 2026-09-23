@@ -2,6 +2,7 @@ package validators
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -66,5 +67,53 @@ func TestRFC3339(t *testing.T) {
 	}
 	if resp := validateString(v, types.StringNull()); resp.Diagnostics.HasError() {
 		t.Errorf("null must be accepted: %v", resp.Diagnostics)
+	}
+}
+
+func TestOneOfWithDeprecatedAliases(t *testing.T) {
+	decisions := OneOfWithDeprecatedAliases(
+		[]string{"allow", "deny", "review", "throttle"},
+		map[string]string{"challenge": "review"},
+	)
+
+	resp := validateString(decisions, types.StringValue("review"))
+	if len(resp.Diagnostics) != 0 {
+		t.Fatalf("review: unexpected diagnostics %v", resp.Diagnostics)
+	}
+
+	resp = validateString(decisions, types.StringValue("challenge"))
+	if resp.Diagnostics.HasError() || resp.Diagnostics.WarningsCount() != 1 {
+		t.Fatalf("challenge: want exactly one warning, got %v", resp.Diagnostics)
+	}
+	want := `Attribute decision value "challenge" is deprecated; use "review". The provider sends "review" for it.`
+	want = strings.Replace(want, "decision", "attr", 1)
+	if got := resp.Diagnostics[0].Detail(); got != want {
+		t.Errorf("warning = %q, want %q", got, want)
+	}
+
+	resp = validateString(decisions, types.StringValue("allowed"))
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("allowed: expected an error")
+	}
+}
+
+func TestInt64Between(t *testing.T) {
+	limit := Int64Between(1, 200)
+	for _, tc := range []struct {
+		value   types.Int64
+		wantErr bool
+	}{
+		{types.Int64Value(1), false},
+		{types.Int64Value(200), false},
+		{types.Int64Value(0), true},
+		{types.Int64Value(500), true},
+		{types.Int64Null(), false},
+		{types.Int64Unknown(), false},
+	} {
+		resp := &validator.Int64Response{}
+		limit.ValidateInt64(context.Background(), validator.Int64Request{Path: path.Root("limit"), ConfigValue: tc.value}, resp)
+		if resp.Diagnostics.HasError() != tc.wantErr {
+			t.Errorf("Int64Between(%s): HasError = %v, want %v", tc.value, resp.Diagnostics.HasError(), tc.wantErr)
+		}
 	}
 }

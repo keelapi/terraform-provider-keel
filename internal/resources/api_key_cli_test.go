@@ -64,7 +64,7 @@ resource "keel_api_key" "approver" {
   scope = "approval"
 }
 `,
-				ExpectError: regexp.MustCompile(`(?s)waiting for dual-control approval.*00000000-0000-4000-9000-000000000001`),
+				ExpectError: regexp.MustCompile(`(?s)waiting\s+for\s+dual-control\s+approval.*00000000-0000-4000-9000-000000000001`),
 			},
 		},
 	})
@@ -186,7 +186,7 @@ resource "keel_api_key" "test" {
 }
 `,
 				PlanOnly:    true,
-				ExpectError: regexp.MustCompile(`value must be one of: "admin", "client", "approval"`),
+				ExpectError: regexp.MustCompile(`must\s+be\s+one\s+of:\s+"admin",\s+"client",\s+"approval",\s+got:\s+"Admin"`),
 			},
 		},
 	})
