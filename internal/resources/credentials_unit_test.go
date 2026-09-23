@@ -125,3 +125,35 @@ func TestOrganizationMemberReadExplainsRejectedUserToken(t *testing.T) {
 		}
 	}
 }
+
+func TestUserTokenErrorDetail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/401":
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"error":{"code":"unauthorized","message":"Missing or invalid user token."}}`)
+		case "/429-auth":
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"code":"auth_failure_rate_limited","message":"Too many authentication failures.","retry_after_seconds":38,"scope":"dashboard_auth"}}`)
+		case "/403":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"error":{"code":"forbidden","message":"Forbidden."}}`)
+		}
+	}))
+	defer srv.Close()
+
+	c := client.New(srv.URL, "dsess_expired")
+	for path, wantHint := range map[string]bool{"/401": true, "/429-auth": true, "/403": false} {
+		_, err := c.Get(context.Background(), path)
+		if err == nil {
+			t.Fatalf("%s: expected an error", path)
+		}
+		detail := userTokenErrorDetail(err)
+		if !strings.HasPrefix(detail, err.Error()) {
+			t.Errorf("%s: detail %q does not start with the API error", path, detail)
+		}
+		if got := strings.Contains(detail, rejectedUserTokenHint); got != wantHint {
+			t.Errorf("%s: hint present = %v, want %v", path, got, wantHint)
+		}
+	}
+}
