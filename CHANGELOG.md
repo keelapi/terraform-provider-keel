@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0 (2026-09-23)
 
 This release makes the provider work end to end against the current Keel API.
 Several configurations that could never succeed are now rejected at plan time
