@@ -179,6 +179,28 @@ type apiKeyCreateRequest struct {
 	ExpiresAt   string `json:"expires_at,omitempty"`
 }
 
+// pendingAPIKeyCreateResponse is the part of Keel's 202 response for an
+// approval-scope key awaiting dual-control approval (PendingApiKeyCreateResponse)
+// that the provider reports. Its raw_key is deliberately not decoded.
+type pendingAPIKeyCreateResponse struct {
+	PendingChangeID string `json:"pending_change_id"`
+	Status          string `json:"status"`
+	ExpiresAt       string `json:"expires_at"`
+}
+
+// parsePendingAPIKeyCreate reports whether a create response is a pending
+// approval rather than a key.
+func parsePendingAPIKeyCreate(status int, body []byte) (*pendingAPIKeyCreateResponse, bool) {
+	var pending pendingAPIKeyCreateResponse
+	if err := json.Unmarshal(body, &pending); err != nil {
+		return &pending, status == http.StatusAccepted
+	}
+	if status == http.StatusAccepted || pending.PendingChangeID != "" {
+		return &pending, true
+	}
+	return nil, false
+}
+
 type apiKeyListResponse struct {
 	Items      []apiKeyAPIModel `json:"items"`
 	NextCursor string           `json:"next_cursor"`
@@ -214,15 +236,40 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		apiReq.ExpiresAt = plan.ExpiresAt.ValueString()
 	}
 
-	body, err := r.client.Post(ctx, apiKeysPath, apiReq)
+	body, status, err := r.client.PostWithStatus(ctx, apiKeysPath, apiReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating API key", err.Error())
+		detail := err.Error()
+		var apiErr *client.APIError
+		if errors.As(err, &apiErr) && apiErr.Code == "approval.authority_configuration_required" {
+			detail += "\n\nApproval-scope keys can only be requested when the project enforces dual control, and each one then waits for a second approver before it is minted."
+		}
+		resp.Diagnostics.AddError("Error creating API key", detail)
+		return
+	}
+
+	// An approval-scope key under enforced dual control is not created yet:
+	// Keel answers 202 with a pending change. Never store it as a key.
+	if pending, ok := parsePendingAPIKeyCreate(status, body); ok {
+		resp.Diagnostics.AddError(
+			"API key is waiting for dual-control approval",
+			fmt.Sprintf("Keel accepted the request for an approval-scope API key as pending change %s (status %q). "+
+				"A second approver from the project's approver group must approve it before the key exists; the request expires at %s.\n\n"+
+				"Terraform cannot manage a key that does not exist yet, so nothing was saved to state, and the key's secret "+
+				"(returned only in this response) was discarded rather than stored. If the change is approved, the key's secret "+
+				"cannot be recovered from Terraform: reject the pending change or let it expire, and request approval-scope keys "+
+				"directly with POST /v1/api-keys, keeping the raw_key it returns until the key is approved.",
+				pending.PendingChangeID, pending.Status, pending.ExpiresAt),
+		)
 		return
 	}
 
 	var apiResp apiKeyAPIModel
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		resp.Diagnostics.AddError("Error parsing response", err.Error())
+		return
+	}
+	if apiResp.ID == "" {
+		resp.Diagnostics.AddError("Error parsing response", fmt.Sprintf("Keel answered HTTP %d without an API key id.", status))
 		return
 	}
 

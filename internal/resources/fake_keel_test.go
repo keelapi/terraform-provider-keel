@@ -54,9 +54,10 @@ type fakeKeel struct {
 	t   *testing.T
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	nextID  int
-	apiKeys []map[string]any
+	mu               sync.Mutex
+	nextID           int
+	apiKeys          []map[string]any
+	pendingApprovals int
 }
 
 func newFakeKeel(t *testing.T) *fakeKeel {
@@ -141,6 +142,24 @@ func (f *fakeKeel) serveAPIKeys(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			expiresAt = ts.UTC().Format(fakeTimestampFmt)
+		}
+		if scope == "approval" {
+			// Enforced dual control: the key is minted only after approval.
+			f.pendingApprovals++
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"project_id":                         fakeProjectID,
+				"pending_change_id":                  fmt.Sprintf("00000000-0000-4000-9000-%012d", f.pendingApprovals),
+				"status":                             "requested",
+				"target_type":                        "approval_api_key_mint",
+				"target_ref":                         "project:" + fakeProjectID + ":approval-api-key-mint",
+				"proposed_change_hash":               "8ac30b04da34f8f2cabce2ef91cd47c91fd0a2b40a7525a202129b665452575a",
+				"approval_requirement_snapshot_hash": "d6be301800b2ae773c3cfbba6ecc7a0b30bdc6ebc061a6c39211406dc011bf50",
+				"expires_at":                         time.Now().Add(24 * time.Hour).UTC().Format(fakeTimestampFmt),
+				"raw_key":                            "keel_sk_Ap_pending_secret",
+				"prefix":                             "keel_sk_Ap",
+				"scope":                              "approval",
+			})
+			return
 		}
 		f.nextID++
 		record := map[string]any{

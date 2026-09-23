@@ -1,6 +1,7 @@
 package resources_test
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -40,4 +41,30 @@ resource "keel_api_key" "test" {
 			},
 		},
 	})
+}
+
+// TestAPIKeyApprovalScopePendingIsAnError: under enforced dual control Keel
+// answers 202 with a pending change. Apply must fail and store nothing.
+func TestAPIKeyApprovalScopePendingIsAnError(t *testing.T) {
+	requireTerraformCLI(t)
+	fake := newFakeKeel(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		CheckDestroy:             fake.checkCreatedKeysRevoked,
+		Steps: []resource.TestStep{
+			{
+				Config: fake.providerConfig() + `
+resource "keel_api_key" "approver" {
+  name  = "approver"
+  scope = "approval"
+}
+`,
+				ExpectError: regexp.MustCompile(`(?s)waiting for dual-control approval.*00000000-0000-4000-9000-000000000001`),
+			},
+		},
+	})
+	if fake.pendingApprovals != 1 {
+		t.Fatalf("pending approvals requested = %d, want 1", fake.pendingApprovals)
+	}
 }
