@@ -43,7 +43,7 @@ func (r *organizationMemberResource) Metadata(_ context.Context, req resource.Me
 
 func (r *organizationMemberResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Keel organization member role.",
+		Description: "Manages a Keel organization member role. Requires the provider's user_token (or KEEL_USER_TOKEN): Keel's organization member routes do not accept API keys.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -82,15 +82,15 @@ func (r *organizationMemberResource) Schema(_ context.Context, _ resource.Schema
 }
 
 func (r *organizationMemberResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
+	data := configuredProviderData(req, resp)
+	if data == nil {
 		return
 	}
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError("Unexpected Resource Configure Type", "Expected *client.Client")
+	if data.UserToken == nil {
+		resp.Diagnostics.AddError(missingUserTokenSummary, missingUserTokenDetail)
 		return
 	}
-	r.client = c
+	r.client = data.UserToken
 }
 
 type organizationMemberAPIModel struct {
@@ -135,7 +135,7 @@ func (r *organizationMemberResource) Create(ctx context.Context, req resource.Cr
 
 	body, err := r.client.Post(ctx, organizationMembersPath(plan.OrgID.ValueString()), apiReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Error creating organization member", err.Error())
+		resp.Diagnostics.AddError("Error creating organization member", userTokenErrorDetail(err))
 		return
 	}
 
@@ -165,7 +165,7 @@ func (r *organizationMemberResource) Read(ctx context.Context, req resource.Read
 
 	found, err := r.findOrganizationMember(ctx, state.OrgID.ValueString(), state.UserID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Error listing organization members", err.Error())
+		resp.Diagnostics.AddError("Error listing organization members", userTokenErrorDetail(err))
 		return
 	}
 	if found == nil {
@@ -192,7 +192,7 @@ func (r *organizationMemberResource) Update(ctx context.Context, req resource.Up
 
 	body, err := r.client.Patch(ctx, organizationMemberPath(state.OrgID.ValueString(), state.UserID.ValueString()), apiReq)
 	if err != nil {
-		resp.Diagnostics.AddError("Error updating organization member", err.Error())
+		resp.Diagnostics.AddError("Error updating organization member", userTokenErrorDetail(err))
 		return
 	}
 
@@ -226,7 +226,7 @@ func (r *organizationMemberResource) Delete(ctx context.Context, req resource.De
 		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
 			return
 		}
-		resp.Diagnostics.AddError("Error deleting organization member", err.Error())
+		resp.Diagnostics.AddError("Error deleting organization member", userTokenErrorDetail(err))
 	}
 }
 

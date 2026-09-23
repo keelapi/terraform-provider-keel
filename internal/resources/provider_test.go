@@ -20,7 +20,10 @@ func testAccPreCheck(t *testing.T) {
 }
 
 func testAccOrganizationMemberPreCheck(t *testing.T) {
-	testAccPreCheck(t)
+	// Keel's organization member routes accept a user token, not an API key.
+	if os.Getenv("KEEL_USER_TOKEN") == "" {
+		t.Fatal("KEEL_USER_TOKEN must be set for organization member acceptance tests")
+	}
 	if os.Getenv("KEEL_TEST_ORG_ID") == "" {
 		t.Fatal("KEEL_TEST_ORG_ID must be set for organization member acceptance tests")
 	}

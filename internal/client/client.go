@@ -20,17 +20,32 @@ const MaxThrottleRetries = 3
 // rather than blocking the Terraform run.
 const MaxThrottleWaitSeconds = 60
 
+// Client calls the Keel API with a single bearer credential.
 type Client struct {
-	BaseURL         string
-	APIKey          string
+	BaseURL string
+	// Token is sent as "Authorization: Bearer <Token>": a Keel API key, or a
+	// Keel user access token for the routes that accept only a user.
+	Token           string
 	HTTPClient      *http.Client
 	ThrottleRetries int // 0 means use default (1). Hard-capped at MaxThrottleRetries.
 }
 
-func New(baseURL, apiKey string) *Client {
+// ProviderData carries the provider's Keel credentials to resources and data
+// sources. A field is nil when its credential is not configured.
+type ProviderData struct {
+	// APIKey authenticates with the provider's Keel API key (api_key or
+	// KEEL_API_KEY). keel_api_key and keel_permit use it.
+	APIKey *Client
+	// UserToken authenticates with a Keel user access token (user_token or
+	// KEEL_USER_TOKEN). Only keel_organization_member uses it: Keel's
+	// organization member routes do not accept API keys.
+	UserToken *Client
+}
+
+func New(baseURL, token string) *Client {
 	return &Client{
 		BaseURL:         baseURL,
-		APIKey:          apiKey,
+		Token:           token,
 		ThrottleRetries: 1,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -72,7 +87,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 			return nil, 0, fmt.Errorf("creating request: %w", err)
 		}
 
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 

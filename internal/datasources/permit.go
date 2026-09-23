@@ -103,12 +103,23 @@ func (d *permitDataSource) Configure(_ context.Context, req datasource.Configure
 	if req.ProviderData == nil {
 		return
 	}
-	c, ok := req.ProviderData.(*client.Client)
+	data, ok := req.ProviderData.(*client.ProviderData)
 	if !ok {
-		resp.Diagnostics.AddError("Unexpected DataSource Configure Type", "Expected *client.Client")
+		resp.Diagnostics.AddError(
+			"Unexpected DataSource Configure Type",
+			fmt.Sprintf("Expected *client.ProviderData, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
 		return
 	}
-	d.client = c
+	if data.APIKey == nil {
+		resp.Diagnostics.AddError(
+			"Missing Keel API key",
+			"keel_permit reads Keel's /v1/permits route, which requires a Keel API key (admin or client scope). "+
+				"Set api_key in the provider configuration or the KEEL_API_KEY environment variable.",
+		)
+		return
+	}
+	d.client = data.APIKey
 }
 
 func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {

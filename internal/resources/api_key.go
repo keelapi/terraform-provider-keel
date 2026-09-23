@@ -148,15 +148,15 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 }
 
 func (r *apiKeyResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
-	if req.ProviderData == nil {
+	data := configuredProviderData(req, resp)
+	if data == nil {
 		return
 	}
-	c, ok := req.ProviderData.(*client.Client)
-	if !ok {
-		resp.Diagnostics.AddError("Unexpected Resource Configure Type", "Expected *client.Client")
+	if data.APIKey == nil {
+		resp.Diagnostics.AddError(missingAPIKeySummary, missingAPIKeyDetail)
 		return
 	}
-	r.client = c
+	r.client = data.APIKey
 }
 
 type apiKeyAPIModel struct {
