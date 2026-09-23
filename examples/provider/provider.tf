@@ -2,7 +2,7 @@ terraform {
   required_providers {
     keel = {
       source  = "keelapi/keel"
-      version = "~> 1.0"
+      version = "~> 1.1"
     }
   }
 }

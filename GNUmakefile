@@ -1,6 +1,6 @@
 # Version the local build reports and installs as. Release builds get theirs
 # from the tag through goreleaser.
-VERSION ?= 1.0.2
+VERSION ?= 1.1.0
 LDFLAGS := -X main.version=$(VERSION)
 
 default: build
