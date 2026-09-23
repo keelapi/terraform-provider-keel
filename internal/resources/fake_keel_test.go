@@ -49,8 +49,6 @@ const (
 // response shapes and authentication rules of the real API:
 //
 //   - /v1/api-keys routes accept only the admin API key;
-//   - /v1/projects/{id}/api-keys routes accept only a user token, so an API
-//     key gets 401 "Missing or invalid user token.";
 //   - /v1/organizations/{org_id}/members routes accept only a user token, so
 //     an API key gets the same 401; roles are stored lowercase;
 //   - timestamps come back normalized to UTC "Z" form.
@@ -142,8 +140,6 @@ func (f *fakeKeel) serve(w http.ResponseWriter, r *http.Request) {
 
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	switch {
-	case strings.HasPrefix(r.URL.Path, "/v1/projects/"):
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid user token.")
 	case strings.HasPrefix(r.URL.Path, "/v1/organizations/"):
 		if bearer != fakeUserToken {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid user token.")

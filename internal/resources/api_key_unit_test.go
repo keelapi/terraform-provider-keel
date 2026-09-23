@@ -45,8 +45,7 @@ func apiKeyRecord(id, projectID, scope, revokedAt string) map[string]any {
 }
 
 // fakeAPIKeysServer serves GET /v1/api-keys and POST /v1/api-keys/{id}/revoke
-// from records, and answers the project-scoped key routes the way Keel does
-// for an API key: 401, since they accept only a user token.
+// from records. Unexpected routes fail the test.
 type fakeAPIKeysServer struct {
 	t       *testing.T
 	mu      sync.Mutex
@@ -61,9 +60,6 @@ func (f *fakeAPIKeysServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch {
-	case strings.HasPrefix(r.URL.Path, "/v1/projects/"):
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, `{"error":{"code":"unauthorized","message":"Missing or invalid user token."}}`)
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/api-keys":
 		if got := r.URL.Query().Get("status"); got != "all" {
 			f.t.Errorf("status query = %q, want all", got)
