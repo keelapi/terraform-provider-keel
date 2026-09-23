@@ -37,6 +37,8 @@ func requireTerraformCLI(t *testing.T) {
 }
 
 const (
+	fakeUserToken    = "dsess_FakeOrgOwnerSession"
+	fakeOrgID        = "7f465e2c-8058-4173-80f3-472caed131c2"
 	fakeAdminKey     = "keel_sk_FakeAdmin_0123456789"
 	fakeProjectID    = "37fae9b0-d2eb-4f50-9650-5aa1197cc632"
 	fakeAdminKeyID   = "fd6c1484-cda3-4c6d-a87f-2812b0d12510"
@@ -49,6 +51,8 @@ const (
 //   - /v1/api-keys routes accept only the admin API key;
 //   - /v1/projects/{id}/api-keys routes accept only a user token, so an API
 //     key gets 401 "Missing or invalid user token.";
+//   - /v1/organizations/{org_id}/members routes accept only a user token, so
+//     an API key gets the same 401; roles are stored lowercase;
 //   - timestamps come back normalized to UTC "Z" form.
 type fakeKeel struct {
 	t   *testing.T
@@ -58,6 +62,7 @@ type fakeKeel struct {
 	nextID           int
 	apiKeys          []map[string]any
 	pendingApprovals int
+	members          []map[string]any
 }
 
 func newFakeKeel(t *testing.T) *fakeKeel {
@@ -76,6 +81,33 @@ func newFakeKeel(t *testing.T) *fakeKeel {
 
 func (f *fakeKeel) URL() string { return f.srv.URL }
 
+// addKey creates a key directly in the fake, as if made outside Terraform,
+// and returns its ID.
+func (f *fakeKeel) addKey(fields map[string]any) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	record := map[string]any{
+		"id":                 fmt.Sprintf("00000000-0000-4000-8000-%012d", f.nextID),
+		"project_id":         fakeProjectID,
+		"prefix":             fmt.Sprintf("keel_sk_%02d", f.nextID),
+		"name":               nil,
+		"description":        nil,
+		"scope":              "admin",
+		"created_by":         nil,
+		"agent_principal_id": nil,
+		"created_at":         "2026-09-21T09:30:00Z",
+		"revoked_at":         nil,
+		"last_used_at":       nil,
+		"expires_at":         nil,
+	}
+	for k, v := range fields {
+		record[k] = v
+	}
+	f.apiKeys = append(f.apiKeys, record)
+	return record["id"].(string)
+}
+
 func (f *fakeKeel) providerConfig() string {
 	return fmt.Sprintf(`
 provider "keel" {
@@ -83,6 +115,15 @@ provider "keel" {
   api_key  = %q
 }
 `, f.srv.URL, fakeAdminKey)
+}
+
+func (f *fakeKeel) userTokenProviderConfig() string {
+	return fmt.Sprintf(`
+provider "keel" {
+  base_url   = %q
+  user_token = %q
+}
+`, f.srv.URL, fakeUserToken)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -103,6 +144,12 @@ func (f *fakeKeel) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/v1/projects/"):
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid user token.")
+	case strings.HasPrefix(r.URL.Path, "/v1/organizations/"):
+		if bearer != fakeUserToken {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid user token.")
+			return
+		}
+		f.serveMembers(w, r)
 	case r.URL.Path == "/v1/api-keys" || strings.HasPrefix(r.URL.Path, "/v1/api-keys/"):
 		if bearer != fakeAdminKey {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Missing or invalid API key.")
@@ -207,6 +254,86 @@ func (f *fakeKeel) serveAPIKeys(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"detail": "Method Not Allowed"})
 	}
+}
+
+func (f *fakeKeel) serveMembers(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/organizations/")
+	parts := strings.Split(rest, "/")
+	if len(parts) < 2 || parts[0] != fakeOrgID || parts[1] != "members" {
+		writeError(w, http.StatusNotFound, "not_found", "Organization not found.")
+		return
+	}
+	find := func(userID string) int {
+		for i, m := range f.members {
+			if m["user_id"] == userID {
+				return i
+			}
+		}
+		return -1
+	}
+	switch {
+	case len(parts) == 2 && r.Method == http.MethodGet:
+		items := f.members
+		if items == nil {
+			items = []map[string]any{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	case len(parts) == 2 && r.Method == http.MethodPost:
+		var req struct {
+			UserID string `json:"user_id"`
+			Role   string `json:"role"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request payload.")
+			return
+		}
+		if find(req.UserID) >= 0 {
+			writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"code": "conflict", "message": "Organization member already exists.", "field": "user_id"}})
+			return
+		}
+		f.nextID++
+		member := map[string]any{
+			"id":         fmt.Sprintf("00000000-0000-4000-a000-%012d", f.nextID),
+			"org_id":     fakeOrgID,
+			"user_id":    req.UserID,
+			"role":       strings.ToLower(strings.TrimSpace(req.Role)),
+			"created_at": time.Now().UTC().Format(fakeTimestampFmt),
+		}
+		f.members = append(f.members, member)
+		writeJSON(w, http.StatusCreated, member)
+	case len(parts) == 3 && r.Method == http.MethodPatch:
+		i := find(parts[2])
+		if i < 0 {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "not_found", "message": "Organization member not found.", "field": "user_id"}})
+			return
+		}
+		var req struct {
+			Role string `json:"role"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		f.members[i]["role"] = strings.ToLower(strings.TrimSpace(req.Role))
+		writeJSON(w, http.StatusOK, f.members[i])
+	case len(parts) == 3 && r.Method == http.MethodDelete:
+		i := find(parts[2])
+		if i < 0 {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"code": "not_found", "message": "Organization member not found.", "field": "user_id"}})
+			return
+		}
+		f.members = append(f.members[:i], f.members[i+1:]...)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"detail": "Method Not Allowed"})
+	}
+}
+
+// checkMembersRemoved is a CheckDestroy for organization members.
+func (f *fakeKeel) checkMembersRemoved(_ *terraform.State) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.members) > 0 {
+		return fmt.Errorf("organization members still present after destroy: %v", f.members)
+	}
+	return nil
 }
 
 // checkCreatedKeysRevoked is a CheckDestroy: every key Terraform created must

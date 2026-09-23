@@ -14,8 +14,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/keelapi/terraform-provider-keel/internal/client"
+	"github.com/keelapi/terraform-provider-keel/internal/validators"
 )
 
 var _ resource.Resource = &organizationMemberResource{}
@@ -68,7 +70,10 @@ func (r *organizationMemberResource) Schema(_ context.Context, _ resource.Schema
 			},
 			"role": schema.StringAttribute{
 				Required:    true,
-				Description: "Organization role to assign to the user.",
+				Description: "Organization role to assign to the user: \"owner\", \"admin\", \"member\", or \"viewer\" (lowercase, as Keel stores it). An organization admin can grant only \"member\" and \"viewer\".",
+				Validators: []validator.String{
+					validators.OneOf("owner", "admin", "member", "viewer"),
+				},
 			},
 			"created_at": schema.StringAttribute{
 				Computed:    true,

@@ -15,31 +15,36 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/keelapi/terraform-provider-keel/internal/client"
+	"github.com/keelapi/terraform-provider-keel/internal/timestamp"
+	"github.com/keelapi/terraform-provider-keel/internal/validators"
 )
 
 var _ resource.Resource = &apiKeyResource{}
 var _ resource.ResourceWithImportState = &apiKeyResource{}
+var _ resource.ResourceWithModifyPlan = &apiKeyResource{}
 
 type apiKeyResource struct {
 	client *client.Client
 }
 
 type apiKeyResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	ProjectID   types.String `tfsdk:"project_id"`
-	Name        types.String `tfsdk:"name"`
-	Description types.String `tfsdk:"description"`
-	Scope       types.String `tfsdk:"scope"`
-	CreatedBy   types.String `tfsdk:"created_by"`
-	Prefix      types.String `tfsdk:"prefix"`
-	RawKey      types.String `tfsdk:"raw_key"`
-	CreatedAt   types.String `tfsdk:"created_at"`
-	RevokedAt   types.String `tfsdk:"revoked_at"`
-	LastUsedAt  types.String `tfsdk:"last_used_at"`
-	ExpiresAt   types.String `tfsdk:"expires_at"`
-	Status      types.String `tfsdk:"status"`
+	ID               types.String      `tfsdk:"id"`
+	ProjectID        types.String      `tfsdk:"project_id"`
+	Name             types.String      `tfsdk:"name"`
+	Description      types.String      `tfsdk:"description"`
+	Scope            types.String      `tfsdk:"scope"`
+	AgentPrincipalID types.String      `tfsdk:"agent_principal_id"`
+	CreatedBy        types.String      `tfsdk:"created_by"`
+	Prefix           types.String      `tfsdk:"prefix"`
+	RawKey           types.String      `tfsdk:"raw_key"`
+	CreatedAt        types.String      `tfsdk:"created_at"`
+	RevokedAt        types.String      `tfsdk:"revoked_at"`
+	LastUsedAt       types.String      `tfsdk:"last_used_at"`
+	ExpiresAt        timestamp.RFC3339 `tfsdk:"expires_at"`
+	Status           types.String      `tfsdk:"status"`
 }
 
 func NewAPIKeyResource() resource.Resource {
@@ -86,8 +91,20 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString("admin"),
-				Description: "Key scope: \"admin\", \"client\", or \"approval\". Default: \"admin\".",
+				Description: "Key scope: \"admin\", \"client\", or \"approval\". Default: \"admin\". An approval-scope key exists only after dual-control approval, which Terraform cannot wait for: the apply fails with the pending change's ID and nothing is stored.",
+				Validators: []validator.String{
+					validators.OneOf("admin", "client", "approval"),
+				},
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"agent_principal_id": schema.StringAttribute{
+				Optional:    true,
+				Computed:    true,
+				Description: "Agent principal to bind the key to, making it that agent's execution credential. Cannot be combined with scope \"approval\". When the provider's own API key is bound to an agent, Keel binds new keys to the same agent.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -129,12 +146,17 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Last-used timestamp, if the key has been used.",
 			},
 			"expires_at": schema.StringAttribute{
+				CustomType:  timestamp.RFC3339Type{},
 				Optional:    true,
 				Computed:    true,
-				Description: "Expiration timestamp, if configured.",
+				Description: "Expiration timestamp, if configured: RFC 3339 with a UTC offset, such as \"2027-01-01T00:00:00Z\". Keel may return the same instant spelled differently; that is not a change.",
+				Validators: []validator.String{
+					validators.RFC3339(),
+				},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
+					timestamp.UseStateForSameInstant(),
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"status": schema.StringAttribute{
@@ -158,25 +180,27 @@ func (r *apiKeyResource) Configure(_ context.Context, req resource.ConfigureRequ
 }
 
 type apiKeyAPIModel struct {
-	ID          string `json:"id,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	CreatedBy   string `json:"created_by,omitempty"`
-	Prefix      string `json:"prefix,omitempty"`
-	RawKey      string `json:"raw_key,omitempty"`
-	CreatedAt   string `json:"created_at,omitempty"`
-	RevokedAt   string `json:"revoked_at,omitempty"`
-	LastUsedAt  string `json:"last_used_at,omitempty"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
+	ID               string `json:"id,omitempty"`
+	ProjectID        string `json:"project_id,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	AgentPrincipalID string `json:"agent_principal_id,omitempty"`
+	CreatedBy        string `json:"created_by,omitempty"`
+	Prefix           string `json:"prefix,omitempty"`
+	RawKey           string `json:"raw_key,omitempty"`
+	CreatedAt        string `json:"created_at,omitempty"`
+	RevokedAt        string `json:"revoked_at,omitempty"`
+	LastUsedAt       string `json:"last_used_at,omitempty"`
+	ExpiresAt        string `json:"expires_at,omitempty"`
 }
 
 type apiKeyCreateRequest struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	Scope       string `json:"scope,omitempty"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Scope            string `json:"scope,omitempty"`
+	AgentPrincipalID string `json:"agent_principal_id,omitempty"`
+	ExpiresAt        string `json:"expires_at,omitempty"`
 }
 
 // pendingAPIKeyCreateResponse is the part of Keel's 202 response for an
@@ -213,24 +237,17 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	scope := plan.Scope.ValueString()
-	if !validAPIKeyScope(scope) {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("scope"),
-			"Invalid API Key Scope",
-			"Scope must be one of: admin, client, approval.",
-		)
-		return
-	}
-
 	apiReq := apiKeyCreateRequest{
-		Scope: scope,
+		Scope: plan.Scope.ValueString(),
 	}
 	if !plan.Name.IsNull() && !plan.Name.IsUnknown() {
 		apiReq.Name = plan.Name.ValueString()
 	}
 	if !plan.Description.IsNull() && !plan.Description.IsUnknown() {
 		apiReq.Description = plan.Description.ValueString()
+	}
+	if !plan.AgentPrincipalID.IsNull() && !plan.AgentPrincipalID.IsUnknown() {
+		apiReq.AgentPrincipalID = plan.AgentPrincipalID.ValueString()
 	}
 	if !plan.ExpiresAt.IsNull() && !plan.ExpiresAt.IsUnknown() {
 		apiReq.ExpiresAt = plan.ExpiresAt.ValueString()
@@ -322,6 +339,49 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	applyAPIKeyToState(&state, *found, false)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+// ModifyPlan plans no change when the configuration matches the key: every
+// configured attribute equals state, with expires_at compared by instant.
+// Without this, a configured expires_at spelled differently from state (for
+// example after import, which stores Keel's spelling) makes the framework mark
+// the unset computed attributes unknown, planning an update of an unchanged
+// key, or a replacement when agent_principal_id is unset.
+func (r *apiKeyResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return // create or destroy
+	}
+	var config, plan, state apiKeyResourceModel
+	resp.Diagnostics.Append(req.Config.Get(ctx, &config)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if apiKeyConfigMatchesState(config, plan, state) {
+		resp.Plan.Raw = req.State.Raw.Copy()
+	}
+}
+
+func apiKeyConfigMatchesState(config, plan, state apiKeyResourceModel) bool {
+	if !config.Name.Equal(state.Name) || !config.Description.Equal(state.Description) {
+		return false
+	}
+	// scope defaults to "admin": compare the planned value.
+	if !plan.Scope.Equal(state.Scope) {
+		return false
+	}
+	// Optional and computed: unset means "whatever the key has".
+	if !config.AgentPrincipalID.IsNull() && !config.AgentPrincipalID.Equal(state.AgentPrincipalID) {
+		return false
+	}
+	if !config.ExpiresAt.IsNull() {
+		if config.ExpiresAt.IsUnknown() || state.ExpiresAt.IsNull() || state.ExpiresAt.IsUnknown() ||
+			!timestamp.SameInstant(config.ExpiresAt.ValueString(), state.ExpiresAt.ValueString()) {
+			return false
+		}
+	}
+	return true
 }
 
 // Update is not supported — all mutable fields use RequiresReplace.
@@ -461,12 +521,17 @@ func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeR
 	state.Name = stringValueOrNull(key.Name)
 	state.Description = stringValueOrNull(key.Description)
 	state.Scope = stringValueOrNull(key.Scope)
+	state.AgentPrincipalID = stringValueOrNull(key.AgentPrincipalID)
 	state.CreatedBy = stringValueOrNull(key.CreatedBy)
 	state.Prefix = stringValueOrNull(key.Prefix)
 	state.CreatedAt = stringValueOrNull(key.CreatedAt)
 	state.RevokedAt = stringValueOrNull(key.RevokedAt)
 	state.LastUsedAt = stringValueOrNull(key.LastUsedAt)
-	state.ExpiresAt = stringValueOrNull(key.ExpiresAt)
+	if key.ExpiresAt == "" {
+		state.ExpiresAt = timestamp.NewNull()
+	} else {
+		state.ExpiresAt = timestamp.NewValue(key.ExpiresAt)
+	}
 	if key.RevokedAt != "" {
 		state.Status = types.StringValue("revoked")
 	} else {
@@ -488,13 +553,4 @@ func stringValueOrNull(s string) types.String {
 		return types.StringNull()
 	}
 	return types.StringValue(s)
-}
-
-func validAPIKeyScope(scope string) bool {
-	switch scope {
-	case "admin", "client", "approval":
-		return true
-	default:
-		return false
-	}
 }
