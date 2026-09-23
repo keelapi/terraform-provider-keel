@@ -1,3 +1,6 @@
+# Requires the provider's user_token (KEEL_USER_TOKEN) for an owner or admin of
+# the organization: Keel's organization member routes do not accept API keys.
+
 variable "org_id" {
   type        = string
   description = "Keel organization ID."

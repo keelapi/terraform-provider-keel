@@ -6,13 +6,18 @@ description: |-
 
 # keel_organization_member (Resource)
 
-Manages a Keel organization member role.
+Manages a Keel organization member role. Requires the provider's user_token (or KEEL_USER_TOKEN): Keel's organization member routes do not accept API keys.
 
 Use this resource to add a user to a Keel organization and manage the user's organization role. `org_id` and `user_id` identify the membership and require replacement if changed. The `role` attribute is updated in place when the Keel API accepts the role change.
+
+The provider's `user_token` must be a Keel user access token for an owner or admin of the organization. User tokens are short-lived, so supply a fresh one for each run, for example through `KEEL_USER_TOKEN`. An organization admin can grant only `member` and `viewer`. When the organization enforces dual control, adding or promoting a privileged member is held for approval: the apply fails with the pending change and nothing is stored.
 
 ## Example Usage
 
 ```terraform
+# Requires the provider's user_token (KEEL_USER_TOKEN) for an owner or admin of
+# the organization: Keel's organization member routes do not accept API keys.
+
 variable "org_id" {
   type        = string
   description = "Keel organization ID."
@@ -48,7 +53,7 @@ terraform import keel_organization_member.member org_id/user_id
 ### Required
 
 - `org_id` (String) Keel organization ID.
-- `role` (String) Organization role to assign to the user.
+- `role` (String) Organization role to assign to the user: "owner", "admin", "member", or "viewer" (lowercase, as Keel stores it). An organization admin can grant only "member" and "viewer".
 - `user_id` (String) Keel user ID to grant membership to.
 
 ### Read-Only

@@ -2,11 +2,17 @@ terraform {
   required_providers {
     keel = {
       source  = "keelapi/keel"
-      version = "~> 0.1"
+      version = "~> 1.1"
     }
   }
 }
 
+# One provider block serves all three objects below; each uses the credential
+# its Keel routes accept:
+#   KEEL_API_KEY     admin-scope API key: keel_api_key, data.keel_permit
+#   KEEL_USER_TOKEN  short-lived user token of an organization owner or admin:
+#                    keel_organization_member (organization member routes do
+#                    not accept API keys)
 provider "keel" {}
 
 variable "org_id" {

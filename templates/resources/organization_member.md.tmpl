@@ -10,6 +10,8 @@ description: |-
 
 Use this resource to add a user to a Keel organization and manage the user's organization role. `org_id` and `user_id` identify the membership and require replacement if changed. The `role` attribute is updated in place when the Keel API accepts the role change.
 
+The provider's `user_token` must be a Keel user access token for an owner or admin of the organization. User tokens are short-lived, so supply a fresh one for each run, for example through `KEEL_USER_TOKEN`. An organization admin can grant only `member` and `viewer`. When the organization enforces dual control, adding or promoting a privileged member is held for approval: the apply fails with the pending change and nothing is stored.
+
 ## Example Usage
 
 {{tffile "examples/organization_member/main.tf"}}

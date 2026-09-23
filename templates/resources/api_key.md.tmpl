@@ -8,7 +8,9 @@ description: |-
 
 {{ .Description | trimspace }}
 
-Use this resource to create API keys for the project associated with the provider API key. The provider API key must have permission to create and revoke keys. API keys are immutable after creation; changing configurable fields forces replacement, and deletion revokes the key.
+Use this resource to create API keys in the project of the provider's API key, which must have admin scope. API keys are immutable after creation; changing configurable fields forces replacement, and deletion revokes the key. The key's secret (`raw_key`) is returned only when the key is created.
+
+Keys with `scope = "approval"` exist only after dual-control approval: Keel refuses them unless the project enforces dual control, and otherwise holds each request for a second approver. Terraform cannot wait for that approval, so the apply fails with the pending change's ID and expiry and nothing is stored.
 
 ## Example Usage
 
@@ -16,11 +18,10 @@ Use this resource to create API keys for the project associated with the provide
 
 ## Import
 
-Import with `key_id` or `project_id/key_id`.
+Import with the key ID. Imported keys have no `raw_key`.
 
 ```shell
 terraform import keel_api_key.backend key_id
-terraform import keel_api_key.backend project_id/key_id
 ```
 
 {{ .SchemaMarkdown | trimspace }}

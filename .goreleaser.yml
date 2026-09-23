@@ -18,7 +18,9 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - '-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}'
+      # main.version reaches the provider (provider.New), so the binary
+      # reports the release version.
+      - '-s -w -X main.version={{.Version}}'
     goos:
       - darwin
       - freebsd

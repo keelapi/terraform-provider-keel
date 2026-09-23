@@ -1,6 +1,7 @@
 package datasources
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,9 +9,15 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/keelapi/terraform-provider-keel/internal/client"
+	"github.com/keelapi/terraform-provider-keel/internal/validators"
 )
+
+// deprecatedDecisionAliases maps filter values Keel no longer accepts to the
+// ones it does: Keel reports review decisions as "review", not "challenge".
+var deprecatedDecisionAliases = map[string]string{"challenge": "review"}
 
 var _ datasource.DataSource = &permitDataSource{}
 
@@ -29,6 +36,7 @@ type permitModel struct {
 	Decision      types.String `tfsdk:"decision"`
 	Reason        types.String `tfsdk:"reason"`
 	ReasonCode    types.String `tfsdk:"reason_code"`
+	OutcomeKind   types.String `tfsdk:"outcome_kind"`
 	ReasonDetail  types.String `tfsdk:"reason_detail"`
 	OutcomeDetail types.String `tfsdk:"outcome_detail"`
 	Message       types.String `tfsdk:"message"`
@@ -45,15 +53,21 @@ func (d *permitDataSource) Metadata(_ context.Context, req datasource.MetadataRe
 
 func (d *permitDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Query Keel permits. Scoped by API key, not by project URL.",
+		Description: "Query Keel permits, newest first (one page of up to 200). Scoped to the project of the provider's API key, which may have admin or client scope.",
 		Attributes: map[string]schema.Attribute{
 			"decision": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by decision: \"allow\", \"deny\", or \"challenge\".",
+				Description: "Filter by decision: \"allow\", \"deny\", \"review\", or \"throttle\". \"challenge\" is a deprecated alias for \"review\".",
+				Validators: []validator.String{
+					validators.OneOfWithDeprecatedAliases([]string{"allow", "deny", "review", "throttle"}, deprecatedDecisionAliases),
+				},
 			},
 			"limit": schema.Int64Attribute{
 				Optional:    true,
-				Description: "Maximum number of permits to return.",
+				Description: "Maximum number of permits to return, from 1 to 200. Keel returns 50 when unset.",
+				Validators: []validator.Int64{
+					validators.Int64Between(1, 200),
+				},
 			},
 			"permits": schema.ListNestedAttribute{
 				Computed:    true,
@@ -66,27 +80,32 @@ func (d *permitDataSource) Schema(_ context.Context, _ datasource.SchemaRequest,
 						},
 						"decision": schema.StringAttribute{
 							Computed:    true,
-							Description: "Permit decision.",
+							Description: "Permit decision: \"allow\", \"deny\", \"review\", or \"throttle\".",
 						},
 						"reason": schema.StringAttribute{
 							Computed:    true,
-							Description: "Permit reason.",
+							Description: "Reason Keel recorded with the decision; usually a reason code.",
 						},
 						"reason_code": schema.StringAttribute{
 							Computed:    true,
-							Description: "Dot-namespaced reason code (Shape D). Example: budget.daily_cap_exceeded.",
+							Description: "Dot-namespaced reason code, from the permit's decision_details.code, or its reason when it has no decision details. Example: budget.daily_cap_exceeded.",
+						},
+						"outcome_kind": schema.StringAttribute{
+							Computed:    true,
+							Description: "What the reason code means: \"decision\" (a policy or budget rule decided), \"precondition\" (Keel could not evaluate the request as configured, so no rule decided), or \"unclassified\".",
 						},
 						"reason_detail": schema.StringAttribute{
 							Computed:    true,
-							Description: "Structured reason detail as JSON string.",
+							Description: "The permit's decision_details object (decision, code, reason and any additional details) as a JSON string, if present.",
 						},
 						"outcome_detail": schema.StringAttribute{
-							Computed:    true,
-							Description: "Structured outcome detail as JSON string (e.g. retry_after_seconds).",
+							Computed:           true,
+							Description:        "Always null: Keel's permit list returns no outcome detail.",
+							DeprecationMessage: "Keel's permit list returns no outcome detail, so outcome_detail is always null. It will be removed in the next major version; use reason_detail.",
 						},
 						"message": schema.StringAttribute{
 							Computed:    true,
-							Description: "Human-readable message from the permit decision.",
+							Description: "Human-readable reason, from the permit's decision_details.reason, if present.",
 						},
 						"created_at": schema.StringAttribute{
 							Computed:    true,
@@ -103,12 +122,23 @@ func (d *permitDataSource) Configure(_ context.Context, req datasource.Configure
 	if req.ProviderData == nil {
 		return
 	}
-	c, ok := req.ProviderData.(*client.Client)
+	data, ok := req.ProviderData.(*client.ProviderData)
 	if !ok {
-		resp.Diagnostics.AddError("Unexpected DataSource Configure Type", "Expected *client.Client")
+		resp.Diagnostics.AddError(
+			"Unexpected DataSource Configure Type",
+			fmt.Sprintf("Expected *client.ProviderData, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+		)
 		return
 	}
-	d.client = c
+	if data.APIKey == nil {
+		resp.Diagnostics.AddError(
+			"Missing Keel API key",
+			"keel_permit reads Keel's /v1/permits route, which requires a Keel API key (admin or client scope). "+
+				"Set api_key in the provider configuration or the KEEL_API_KEY environment variable.",
+		)
+		return
+	}
+	d.client = data.APIKey
 }
 
 func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
@@ -119,10 +149,14 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 	}
 
 	params := url.Values{}
-	if !config.Decision.IsNull() {
-		params.Set("decision", config.Decision.ValueString())
+	if !config.Decision.IsNull() && !config.Decision.IsUnknown() {
+		decision := config.Decision.ValueString()
+		if replacement, ok := deprecatedDecisionAliases[decision]; ok {
+			decision = replacement // the validator warns about the alias
+		}
+		params.Set("decision", decision)
 	}
-	if !config.Limit.IsNull() {
+	if !config.Limit.IsNull() && !config.Limit.IsUnknown() {
 		params.Set("limit", fmt.Sprintf("%d", config.Limit.ValueInt64()))
 	}
 
@@ -137,18 +171,18 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 		return
 	}
 
+	// PermitAuditListResponse. Only the fields the data source exposes are
+	// decoded; reason codes and messages live in decision_details.
 	var apiResp struct {
 		Items []struct {
-			ID            string          `json:"id"`
-			Decision      string          `json:"decision"`
-			Reason        string          `json:"reason"`
-			ReasonCode    string          `json:"reason_code"`
-			ReasonDetail  json.RawMessage `json:"reason_detail"`
-			OutcomeDetail json.RawMessage `json:"outcome_detail"`
-			Message       string          `json:"message"`
-			CreatedAt     string          `json:"created_at"`
+			ID              string          `json:"id"`
+			Decision        string          `json:"decision"`
+			Reason          string          `json:"reason"`
+			OutcomeKind     string          `json:"outcome_kind"`
+			DecisionDetails json.RawMessage `json:"decision_details"`
+			CreatedAt       string          `json:"created_at"`
 		} `json:"items"`
-		NextCursor string `json:"next_cursor"`
+		NextCursor *string `json:"next_cursor"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		resp.Diagnostics.AddError("Error parsing response", err.Error())
@@ -157,14 +191,29 @@ func (d *permitDataSource) Read(ctx context.Context, req datasource.ReadRequest,
 
 	config.Permits = make([]permitModel, len(apiResp.Items))
 	for i, p := range apiResp.Items {
+		var details struct {
+			Code   string `json:"code"`
+			Reason string `json:"reason"`
+		}
+		if len(p.DecisionDetails) > 0 && string(p.DecisionDetails) != "null" {
+			if err := json.Unmarshal(p.DecisionDetails, &details); err != nil {
+				resp.Diagnostics.AddError("Error parsing response", fmt.Sprintf("permit %s decision_details: %s", p.ID, err))
+				return
+			}
+		}
+		reasonCode := details.Code
+		if reasonCode == "" {
+			reasonCode = p.Reason
+		}
 		config.Permits[i] = permitModel{
 			ID:            types.StringValue(p.ID),
 			Decision:      types.StringValue(p.Decision),
 			Reason:        types.StringValue(p.Reason),
-			ReasonCode:    stringOrNull(p.ReasonCode),
-			ReasonDetail:  rawJSONOrNull(p.ReasonDetail),
-			OutcomeDetail: rawJSONOrNull(p.OutcomeDetail),
-			Message:       stringOrNull(p.Message),
+			ReasonCode:    stringOrNull(reasonCode),
+			OutcomeKind:   stringOrNull(p.OutcomeKind),
+			ReasonDetail:  rawJSONOrNull(p.DecisionDetails),
+			OutcomeDetail: types.StringNull(),
+			Message:       stringOrNull(details.Reason),
 			CreatedAt:     types.StringValue(p.CreatedAt),
 		}
 	}
@@ -179,9 +228,14 @@ func stringOrNull(s string) types.String {
 	return types.StringValue(s)
 }
 
+// rawJSONOrNull returns compact JSON, or null for an absent or null value.
 func rawJSONOrNull(raw json.RawMessage) types.String {
 	if len(raw) == 0 || string(raw) == "null" {
 		return types.StringNull()
 	}
-	return types.StringValue(string(raw))
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return types.StringValue(string(raw))
+	}
+	return types.StringValue(compact.String())
 }

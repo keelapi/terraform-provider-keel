@@ -21,8 +21,9 @@ type keelProvider struct {
 }
 
 type keelProviderModel struct {
-	BaseURL types.String `tfsdk:"base_url"`
-	APIKey  types.String `tfsdk:"api_key"`
+	BaseURL   types.String `tfsdk:"base_url"`
+	APIKey    types.String `tfsdk:"api_key"`
+	UserToken types.String `tfsdk:"user_token"`
 }
 
 func New(version string) func() provider.Provider {
@@ -40,7 +41,7 @@ func (p *keelProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 
 func (p *keelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manage Keel API-key-backed resources.",
+		Description: "Manage Keel API keys and organization membership, and query permits.",
 		Attributes: map[string]schema.Attribute{
 			"base_url": schema.StringAttribute{
 				Optional:    true,
@@ -49,7 +50,12 @@ func (p *keelProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 			"api_key": schema.StringAttribute{
 				Optional:    true,
 				Sensitive:   true,
-				Description: "Keel API key. Can also be set via KEEL_API_KEY env var.",
+				Description: "Keel API key, used by keel_api_key (admin scope required) and keel_permit (admin or client scope). Can also be set via KEEL_API_KEY env var.",
+			},
+			"user_token": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				Description: "Keel user access token, used only by keel_organization_member: Keel's organization member routes accept a signed-in user's credential, not an API key. The user must be an owner or admin of the organization. User tokens are short-lived (a Keel dashboard session token expires after 30 minutes), so supply a fresh one for each run, typically through the KEEL_USER_TOKEN env var.",
 			},
 		},
 	}
@@ -69,24 +75,36 @@ func (p *keelProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		baseURL = v
 	}
 
-	apiKey := ""
-	if !config.APIKey.IsNull() && !config.APIKey.IsUnknown() {
-		apiKey = config.APIKey.ValueString()
-	} else if v := os.Getenv("KEEL_API_KEY"); v != "" {
-		apiKey = v
-	}
+	apiKey := stringFromConfigOrEnv(config.APIKey, "KEEL_API_KEY")
+	userToken := stringFromConfigOrEnv(config.UserToken, "KEEL_USER_TOKEN")
 
-	if apiKey == "" {
+	if apiKey == "" && userToken == "" {
 		resp.Diagnostics.AddError(
-			"Missing API Key",
-			"The Keel API key must be set in the provider configuration or via the KEEL_API_KEY environment variable.",
+			"Missing Keel credentials",
+			"Set api_key (or the KEEL_API_KEY environment variable) to a Keel API key for keel_api_key and keel_permit, "+
+				"and user_token (or KEEL_USER_TOKEN) to a Keel user access token for keel_organization_member.",
 		)
 		return
 	}
 
-	c := client.New(baseURL, apiKey)
-	resp.DataSourceData = c
-	resp.ResourceData = c
+	data := &client.ProviderData{}
+	if apiKey != "" {
+		data.APIKey = client.New(baseURL, apiKey)
+	}
+	if userToken != "" {
+		data.UserToken = client.New(baseURL, userToken)
+	}
+	resp.DataSourceData = data
+	resp.ResourceData = data
+}
+
+// stringFromConfigOrEnv returns the configured value when it is known, else
+// the environment variable.
+func stringFromConfigOrEnv(value types.String, envVar string) string {
+	if !value.IsNull() && !value.IsUnknown() {
+		return value.ValueString()
+	}
+	return os.Getenv(envVar)
 }
 
 func (p *keelProvider) Resources(_ context.Context) []func() resource.Resource {

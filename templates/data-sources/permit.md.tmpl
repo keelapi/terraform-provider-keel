@@ -8,7 +8,7 @@ description: |-
 
 {{ .Description | trimspace }}
 
-Use this data source to read recent Keel permit decisions scoped by the provider API key. Optional filters can narrow results by decision and limit the number of returned permits.
+Use this data source to read recent Keel permit decisions in the project of the provider's API key. Optional filters narrow results by decision (`allow`, `deny`, `review`, or `throttle`) and limit the number of returned permits (1-200). `decision = "challenge"` is a deprecated alias for `review`.
 
 ## Example Usage
 

@@ -8,23 +8,44 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // MaxThrottleRetries is the hard cap for 429 retry attempts.
 const MaxThrottleRetries = 3
 
+// MaxThrottleWaitSeconds caps how long the client waits before retrying a 429.
+// When Keel asks for a longer wait, the ThrottledError is returned at once
+// rather than blocking the Terraform run.
+const MaxThrottleWaitSeconds = 60
+
+// Client calls the Keel API with a single bearer credential.
 type Client struct {
-	BaseURL        string
-	APIKey         string
-	HTTPClient     *http.Client
+	BaseURL string
+	// Token is sent as "Authorization: Bearer <Token>": a Keel API key, or a
+	// Keel user access token for the routes that accept only a user.
+	Token           string
+	HTTPClient      *http.Client
 	ThrottleRetries int // 0 means use default (1). Hard-capped at MaxThrottleRetries.
 }
 
-func New(baseURL, apiKey string) *Client {
+// ProviderData carries the provider's Keel credentials to resources and data
+// sources. A field is nil when its credential is not configured.
+type ProviderData struct {
+	// APIKey authenticates with the provider's Keel API key (api_key or
+	// KEEL_API_KEY). keel_api_key and keel_permit use it.
+	APIKey *Client
+	// UserToken authenticates with a Keel user access token (user_token or
+	// KEEL_USER_TOKEN). Only keel_organization_member uses it: Keel's
+	// organization member routes do not accept API keys.
+	UserToken *Client
+}
+
+func New(baseURL, token string) *Client {
 	return &Client{
 		BaseURL:         baseURL,
-		APIKey:          apiKey,
+		Token:           token,
 		ThrottleRetries: 1,
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
@@ -66,7 +87,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 			return nil, 0, fmt.Errorf("creating request: %w", err)
 		}
 
-		req.Header.Set("Authorization", "Bearer "+c.APIKey)
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
@@ -83,10 +104,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 
 		// Handle 429 throttle with retry.
 		if resp.StatusCode == http.StatusTooManyRequests {
-			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), respBody)
+			throttled := newThrottledError(resp.Header.Get("Retry-After"), respBody)
 
-			if attempt < maxAttempts-1 {
-				wait := time.Duration(retryAfter) * time.Second
+			if attempt < maxAttempts-1 && throttled.retryable() {
+				wait := time.Duration(throttled.RetryAfterSeconds) * time.Second
 				select {
 				case <-time.After(wait):
 					continue
@@ -95,21 +116,12 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 				}
 			}
 
-			// Retries exhausted — return ThrottledError.
-			permitID, reasonCode := parseThrottleBody(respBody)
-			return respBody, resp.StatusCode, &ThrottledError{
-				RetryAfterSeconds: retryAfter,
-				PermitID:          permitID,
-				ReasonCode:        reasonCode,
-				Body:              respBody,
-			}
+			// Not retryable, or retries exhausted.
+			return respBody, resp.StatusCode, throttled
 		}
 
 		if resp.StatusCode >= 400 {
-			return respBody, resp.StatusCode, &APIError{
-				StatusCode: resp.StatusCode,
-				Body:       respBody,
-			}
+			return respBody, resp.StatusCode, newAPIError(resp.StatusCode, respBody)
 		}
 
 		return respBody, resp.StatusCode, nil
@@ -121,38 +133,18 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any) (
 
 // parseRetryAfter extracts the retry delay in seconds. It prefers the
 // Retry-After header; if absent or unparseable it falls back to the
-// retry_after_seconds value in the response body. Returns 1 as a minimum.
+// retry_after_seconds value in the response body (see
+// errorEnvelope.retryAfterSeconds). Returns 1 as a minimum.
 func parseRetryAfter(header string, body []byte) int {
 	if header != "" {
-		if secs, err := strconv.Atoi(header); err == nil && secs > 0 {
+		if secs, err := strconv.Atoi(strings.TrimSpace(header)); err == nil && secs > 0 {
 			return secs
 		}
 	}
-	var envelope struct {
-		Permit struct {
-			OutcomeDetail struct {
-				RetryAfterSeconds int `json:"retry_after_seconds"`
-			} `json:"outcome_detail"`
-		} `json:"permit"`
-	}
-	if json.Unmarshal(body, &envelope) == nil && envelope.Permit.OutcomeDetail.RetryAfterSeconds > 0 {
-		return envelope.Permit.OutcomeDetail.RetryAfterSeconds
+	if secs := parseErrorEnvelope(body).retryAfterSeconds(); secs > 0 {
+		return secs
 	}
 	return 1
-}
-
-// parseThrottleBody extracts permit_id and reason_code from a 429 body.
-func parseThrottleBody(body []byte) (permitID, reasonCode string) {
-	var envelope struct {
-		Permit struct {
-			PermitID   string `json:"permit_id"`
-			ReasonCode string `json:"reason_code"`
-		} `json:"permit"`
-	}
-	if json.Unmarshal(body, &envelope) == nil {
-		return envelope.Permit.PermitID, envelope.Permit.ReasonCode
-	}
-	return "", ""
 }
 
 func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
@@ -163,6 +155,12 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 func (c *Client) Post(ctx context.Context, path string, body any) ([]byte, error) {
 	data, _, err := c.doRequest(ctx, http.MethodPost, path, body)
 	return data, err
+}
+
+// PostWithStatus is Post, also returning the HTTP status code so callers can
+// tell a 201 from a 202 (accepted, pending approval).
+func (c *Client) PostWithStatus(ctx context.Context, path string, body any) ([]byte, int, error) {
+	return c.doRequest(ctx, http.MethodPost, path, body)
 }
 
 func (c *Client) Put(ctx context.Context, path string, body any) ([]byte, error) {
@@ -180,7 +178,7 @@ func (c *Client) Delete(ctx context.Context, path string) error {
 	return err
 }
 
-// IsNotFound returns true if the error represents a 404 response.
+// GetWithStatus is Get, also returning the HTTP status code.
 func (c *Client) GetWithStatus(ctx context.Context, path string) ([]byte, int, error) {
 	return c.doRequest(ctx, http.MethodGet, path, nil)
 }
