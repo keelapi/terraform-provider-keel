@@ -62,12 +62,10 @@ func (r *apiKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"project_id": schema.StringAttribute{
-				Optional:    true,
 				Computed:    true,
-				Description: "Project ID this key belongs to. When omitted, the provider uses /v1/api-keys and the Keel API derives the project from the provider API key.",
+				Description: "Project the key belongs to: always the project of the provider's API key, because Keel creates, lists and revokes keys within that project.",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
-					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -203,19 +201,6 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	projectID := ""
-	if !plan.ProjectID.IsNull() && !plan.ProjectID.IsUnknown() {
-		projectID = plan.ProjectID.ValueString()
-	}
-	if projectID != "" && scope == "approval" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("scope"),
-			"Invalid Project API Key Scope",
-			"Project-scoped API keys support admin and client scopes. Omit project_id to use /v1/api-keys with approval scope.",
-		)
-		return
-	}
-
 	apiReq := apiKeyCreateRequest{
 		Scope: scope,
 	}
@@ -229,7 +214,7 @@ func (r *apiKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 		apiReq.ExpiresAt = plan.ExpiresAt.ValueString()
 	}
 
-	body, err := r.client.Post(ctx, apiKeyCollectionPath(projectID), apiReq)
+	body, err := r.client.Post(ctx, apiKeysPath, apiReq)
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating API key", err.Error())
 		return
@@ -253,20 +238,36 @@ func (r *apiKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
-	projectID := ""
-	if !state.ProjectID.IsNull() && !state.ProjectID.IsUnknown() {
-		projectID = state.ProjectID.ValueString()
-	}
-
 	// No single-key GET endpoint — use the list endpoint and filter by ID.
-	found, err := r.findAPIKey(ctx, state.ID.ValueString(), projectID)
+	keyID := state.ID.ValueString()
+	found, listedProjectID, err := r.findAPIKey(ctx, keyID)
 	if err != nil {
 		resp.Diagnostics.AddError("Error listing API keys", err.Error())
 		return
 	}
 
-	if found == nil || found.RevokedAt != "" {
-		// Key no longer exists (revoked or deleted).
+	stateProjectID := state.ProjectID.ValueString()
+	if found == nil {
+		if stateProjectID != "" && listedProjectID != "" && listedProjectID != stateProjectID {
+			// Keel lists only the provider key's project, so absence here says
+			// nothing about the key. Refuse rather than drop a live key from state.
+			resp.Diagnostics.AddError(wrongProjectSummary, wrongProjectDetail(keyID, stateProjectID, listedProjectID))
+			return
+		}
+		// Key no longer exists.
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	if stateProjectID != "" && found.ProjectID != stateProjectID {
+		// Only reachable through a project_id/key_id import naming the wrong project.
+		resp.Diagnostics.AddError(
+			"API key belongs to a different project",
+			fmt.Sprintf("The import ID names project %s, but API key %s belongs to project %s.", stateProjectID, keyID, found.ProjectID),
+		)
+		return
+	}
+	if found.RevokedAt != "" {
+		// Key has been revoked.
 		resp.State.RemoveResource(ctx)
 		return
 	}
@@ -291,47 +292,60 @@ func (r *apiKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	// API uses POST revoke, not DELETE.
-	projectID := ""
-	if !state.ProjectID.IsNull() && !state.ProjectID.IsUnknown() {
-		projectID = state.ProjectID.ValueString()
+	// API uses POST revoke, not DELETE. Revoking an already revoked key succeeds.
+	keyID := state.ID.ValueString()
+	_, err := r.client.Post(ctx, apiKeyRevokePath(keyID), nil)
+	if err == nil {
+		return
+	}
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
+		resp.Diagnostics.AddError("Error revoking API key", err.Error())
+		return
 	}
 
-	_, err := r.client.Post(ctx, apiKeyRevokePath(projectID, state.ID.ValueString()), nil)
-	if err != nil {
-		var apiErr *client.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
-			return
-		}
-		resp.Diagnostics.AddError("Error revoking API key", err.Error())
+	// 404: the key is not in the provider key's project. It is gone only if
+	// state records it in that same project.
+	stateProjectID := state.ProjectID.ValueString()
+	if stateProjectID == "" {
+		return
+	}
+	listedProjectID, listErr := r.providerProjectID(ctx)
+	if listErr != nil {
+		resp.Diagnostics.AddError(
+			"Error revoking API key",
+			fmt.Sprintf("%s\n\nChecking which project the provider's API key belongs to also failed: %s", err, listErr),
+		)
+		return
+	}
+	if listedProjectID != "" && listedProjectID != stateProjectID {
+		resp.Diagnostics.AddError(wrongProjectSummary, wrongProjectDetail(keyID, stateProjectID, listedProjectID))
 	}
 }
 
 func (r *apiKeyResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
-	switch len(parts) {
-	case 1:
+	switch {
+	case len(parts) == 1 && parts[0] != "":
 		resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
-	case 2:
-		if parts[0] == "" || parts[1] == "" {
-			resp.Diagnostics.AddError(
-				"Invalid API Key Import ID",
-				"Import ID must be either key_id or project_id/key_id.",
-			)
-			return
-		}
+	case len(parts) == 2 && parts[0] != "" && parts[1] != "":
+		// Legacy project_id/key_id form. The project must be the provider API
+		// key's project; Read checks it.
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
 		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
 	default:
 		resp.Diagnostics.AddError(
 			"Invalid API Key Import ID",
-			"Import ID must be either key_id or project_id/key_id.",
+			"Import ID must be the API key ID (key_id). The legacy project_id/key_id form is also accepted when project_id is the provider API key's project.",
 		)
 	}
 }
 
-func (r *apiKeyResource) findAPIKey(ctx context.Context, id string, projectID string) (*apiKeyAPIModel, error) {
+// findAPIKey pages through the provider key's project and returns the key
+// with the given ID (nil when absent) and the project the listed keys belong to.
+func (r *apiKeyResource) findAPIKey(ctx context.Context, id string) (*apiKeyAPIModel, string, error) {
 	cursor := ""
+	listedProjectID := ""
 	for {
 		params := url.Values{}
 		params.Set("status", "all")
@@ -340,27 +354,58 @@ func (r *apiKeyResource) findAPIKey(ctx context.Context, id string, projectID st
 			params.Set("cursor", cursor)
 		}
 
-		body, err := r.client.Get(ctx, apiKeyCollectionPath(projectID)+"?"+params.Encode())
+		body, err := r.client.Get(ctx, apiKeysPath+"?"+params.Encode())
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 
 		var apiResp apiKeyListResponse
 		if err := json.Unmarshal(body, &apiResp); err != nil {
-			return nil, fmt.Errorf("parsing API key list response: %w", err)
+			return nil, "", fmt.Errorf("parsing API key list response: %w", err)
 		}
 
 		for i := range apiResp.Items {
+			if listedProjectID == "" {
+				listedProjectID = apiResp.Items[i].ProjectID
+			}
 			if apiResp.Items[i].ID == id {
-				return &apiResp.Items[i], nil
+				return &apiResp.Items[i], listedProjectID, nil
 			}
 		}
 
 		if apiResp.NextCursor == "" {
-			return nil, nil
+			return nil, listedProjectID, nil
 		}
 		cursor = apiResp.NextCursor
 	}
+}
+
+// providerProjectID returns the project of the provider's API key, read from
+// the first key Keel lists (the list always includes the calling key).
+func (r *apiKeyResource) providerProjectID(ctx context.Context) (string, error) {
+	body, err := r.client.Get(ctx, apiKeysPath+"?status=all&limit=1")
+	if err != nil {
+		return "", err
+	}
+	var apiResp apiKeyListResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("parsing API key list response: %w", err)
+	}
+	if len(apiResp.Items) == 0 {
+		return "", nil
+	}
+	return apiResp.Items[0].ProjectID, nil
+}
+
+const wrongProjectSummary = "API key belongs to a different project"
+
+func wrongProjectDetail(keyID, stateProjectID, providerProjectID string) string {
+	return fmt.Sprintf(
+		"State records API key %s in project %s, but the provider's API key belongs to project %s. "+
+			"Keel manages API keys only within the project of the API key making the request, so this key cannot be read or revoked with the current credential. "+
+			"Configure the provider with an admin-scope API key from project %s, or run `terraform state rm` if the key is managed elsewhere.",
+		keyID, stateProjectID, providerProjectID, stateProjectID,
+	)
 }
 
 func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeRawKey bool) {
@@ -385,18 +430,10 @@ func applyAPIKeyToState(state *apiKeyResourceModel, key apiKeyAPIModel, includeR
 	}
 }
 
-func apiKeyCollectionPath(projectID string) string {
-	if projectID == "" {
-		return "/v1/api-keys"
-	}
-	return fmt.Sprintf("/v1/projects/%s/api-keys", url.PathEscape(projectID))
-}
+const apiKeysPath = "/v1/api-keys"
 
-func apiKeyRevokePath(projectID, keyID string) string {
-	if projectID == "" {
-		return fmt.Sprintf("/v1/api-keys/%s/revoke", url.PathEscape(keyID))
-	}
-	return fmt.Sprintf("/v1/projects/%s/api-keys/%s/revoke", url.PathEscape(projectID), url.PathEscape(keyID))
+func apiKeyRevokePath(keyID string) string {
+	return fmt.Sprintf("%s/%s/revoke", apiKeysPath, url.PathEscape(keyID))
 }
 
 func stringValueOrNull(s string) types.String {
