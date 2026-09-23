@@ -2,28 +2,132 @@
 
 ## Unreleased
 
+This release makes the provider work end to end against the current Keel API.
+Several configurations that could never succeed are now rejected at plan time
+with an explanation; see **Changed** before upgrading.
+
 ### Added
 
-- **`keel_organization_member` resource** backed by `/v1/organizations/{org_id}/members`, including create, read, update, delete, import support, acceptance tests, and example configuration.
-- **API key import support** and import acceptance coverage for `keel_api_key`.
-- **OPA policy gate example** under `examples/opa-policy-gate`, showing `terraform plan` JSON export, Rego evaluation, and gated apply.
-- **v1.0 blocker documentation** for deferred resources under `docs/blockers.md`.
-- **HTTP 429 throttle handling with auto-retry.** The HTTP client now detects
-  rate-limit throttle responses (HTTP 429), parses the `Retry-After` header
-  (with body fallback), and retries automatically. Configurable retry count
-  (default 1, hard cap 3). Non-throttle 4xx errors are never retried.
-- **`ThrottledError` error type** (`internal/client/errors.go`) exposing
-  `RetryAfterSeconds`, `PermitID`, and `ReasonCode`. Returned after retries
-  are exhausted on 429.
-- **`APIError` error type** (`internal/client/errors.go`) for all non-429
-  HTTP errors, replacing the previous untyped `fmt.Errorf`.
-- **Shape D reason code constants** (`internal/client/reason_codes.go`):
-  11 dot-namespaced reason codes matching keel-api V1.16.0.
-- **Permit data source expanded fields**: `reason_code`, `reason_detail`,
-  `outcome_detail`, and `message` are now exposed on `keel_permit` permits.
-- **Rate limiting documentation** in README.
+- **`user_token` provider argument** (`KEEL_USER_TOKEN`), used only by
+  `keel_organization_member`. Keel's organization member routes accept a
+  signed-in user's credential, not an API key. User tokens are short-lived (a
+  Keel dashboard session token expires after 30 minutes).
+- **`keel_api_key.agent_principal_id`**: bind a key to an agent principal
+  (`POST /v1/api-keys`), and read the binding back.
+- **`keel_permit` `permits[*].outcome_kind`**: `decision`, `precondition` or
+  `unclassified`.
+- **Plan-time validation** for `keel_api_key.scope` (`admin`, `client`,
+  `approval`), `keel_api_key.expires_at` (RFC 3339 with a UTC offset),
+  `keel_organization_member.role` (`owner`, `admin`, `member`, `viewer`),
+  `keel_permit.decision` and `keel_permit.limit` (1-200).
+- **Reason-code constants** for all 27 codes in Keel's permit-decision lexicon,
+  plus `policy.explicit_authorization_required`.
 
 ### Changed
 
-- **`keel_api_key` scope default now matches `/v1/api-keys`: `admin`.** Prior provider behavior defaulted to `client`.
-- **`keel_api_key` now exposes `created_by` as a computed field** and accepts optional `project_id` to use project-scoped API key endpoints.
+- **`keel_api_key.project_id` is read-only.** Keys are always created, read,
+  imported and revoked through `/v1/api-keys`, in the project of the
+  provider's API key. Remove `project_id` from configurations that set it
+  (that mode needed a user credential and failed with an API key).
+- **`keel_organization_member` requires `user_token`.** Without it the
+  provider fails at plan time instead of sending the API key, which Keel
+  always rejected with 401.
+- **The provider needs `api_key` or `user_token`** (previously `api_key` was
+  required). Each resource reports the credential it is missing.
+- **`keel_organization_member.role` must be lowercase.** Keel stores roles
+  lowercase; `"Member"` used to apply and then fail with "Provider produced
+  inconsistent result".
+- **`keel_permit.decision` takes `allow`, `deny`, `review` or `throttle`.**
+- **Errors report Keel's error code and message** (and the field, for
+  validation errors) instead of the raw response body.
+- **HTTP 429**: the retry wait comes from `Retry-After` or the error body's
+  `retry_after_seconds`. Authentication-failure 429s and waits over 60 seconds
+  are returned without a retry.
+
+### Fixed
+
+- `keel_api_key`: every plan, refresh, import and destroy after the first
+  apply failed with 401 "Missing or invalid user token.", so Terraform could
+  not revoke the keys it created.
+- `keel_api_key` with `scope = "approval"`: a pending dual-control response
+  (HTTP 202) was stored as a key with no ID, including the secret of a key that
+  did not exist yet. The apply now fails with the pending change's ID and
+  expiry and stores nothing. The 403 Keel returns when the project does not
+  enforce dual control now shows Keel's message.
+- `keel_api_key.expires_at`: a timestamp Keel returns re-serialized (for example
+  `Z` for `+00:00`) no longer causes "Provider produced inconsistent result",
+  or a replacement after import.
+- `keel_permit`: `reason_code`, `message` and `reason_detail` were always null.
+  They now come from the permit's decision details (`reason_code` falls back to
+  `reason`).
+- `keel_permit` with `decision = "challenge"` failed with HTTP 400.
+- Release binaries reported provider version `dev`; `make install` installed
+  the build as version 0.1.0.
+- `examples/opa-policy-gate` pinned `~> 0.1`, which no release matches.
+
+### Deprecated
+
+- `keel_permit.decision = "challenge"`: use `"review"`. The provider sends
+  `review` and warns.
+- `keel_permit` `permits[*].outcome_detail`: the permit list has no outcome
+  detail, so it is always null. It will be removed in the next major version.
+
+## 1.0.2 (2026-05-23)
+
+Documentation release; the provider code is identical to 1.0.1.
+
+### Added
+
+- Terraform Registry documentation under `docs/`, generated by `tfplugindocs`
+  from `templates/` and `examples/` (`make generate-docs`, with `make docs` as
+  an alias).
+
+### Changed
+
+- `docs/blockers.md` is marked as an internal tracker, outside the published
+  provider reference.
+
+## 1.0.1 (2026-05-23)
+
+First Terraform Registry release (`keelapi/keel`). Changes since the `v0.1.0`
+source tag, which was never published:
+
+### Added
+
+- **`keel_organization_member` resource** backed by
+  `/v1/organizations/{org_id}/members`, including create, read, update,
+  delete, import support, acceptance tests, and example configuration.
+- **API key import support**, a computed `created_by`, and an optional
+  `project_id` on `keel_api_key`.
+- **OPA policy gate example** under `examples/opa-policy-gate`, showing
+  `terraform plan` JSON export, Rego evaluation, and gated apply.
+- **Blocker documentation** for deferred resources under `docs/blockers.md`.
+- **HTTP 429 throttle handling with auto-retry** (default 1 retry, hard cap
+  3), with `ThrottledError` and `APIError` error types.
+- **`keel_permit` attributes** `reason_code`, `reason_detail`,
+  `outcome_detail` and `message`.
+- **Reason-code constants** for 11 dot-namespaced codes.
+- **Terraform Registry publication**: GoReleaser configuration, signed
+  checksums, registry manifest, and a tag-driven release workflow.
+
+### Changed
+
+- **`keel_api_key` scope default is `admin`**, matching `/v1/api-keys`. It was
+  `client`.
+
+### Removed
+
+- The `keel_project`, `keel_policy_rule`, `keel_budget_envelope`,
+  `keel_routing_config` and `keel_provider_key` resources and the
+  `keel_project` and `keel_usage_summary` data sources, which were not backed
+  by routes that accept an API key.
+
+### Known issues (fixed in the next release)
+
+- `keel_api_key` could be created but not refreshed, imported or destroyed
+  (401), and `project_id` mode never worked with an API key.
+- `keel_organization_member` never worked with an API key (401).
+- `scope = "approval"` stored a pending approval as a key.
+- `keel_permit` `reason_code`, `reason_detail`, `outcome_detail` and `message`
+  were always null.
+- Release binaries report version `dev`.

@@ -5,6 +5,19 @@ Terraform provider to the public Terraform Registry. Do not generate, export,
 commit, or upload signing key material from automation or from another person's
 machine.
 
+## Current state
+
+- The provider is listed on the Terraform Registry as `keelapi/keel`, with
+  versions 1.0.1 and 1.0.2 (protocol 6.0, 12 platforms each).
+- The public GitHub repository is `keelapi/terraform-provider-keel`, and the
+  Registry's release webhook is in place: a new GitHub release is picked up
+  automatically.
+- The signing key, GitHub Actions secrets and Registry public key from steps
+  1-5 below are configured. Those steps are needed again only to rotate the
+  signing key or recreate the listing.
+
+To publish a new version, follow [Cutting a release](#cutting-a-release).
+
 ## Current automation audit
 
 The release automation is configured for Terraform Registry releases after the
@@ -125,11 +138,7 @@ Confirm the Registry shows the same fingerprint recorded in Step 1.
 The public Terraform Registry only detects public GitHub provider repositories
 whose names match `terraform-provider-{NAME}`. For the provider address
 `keelapi/keel`, the GitHub repository must be public and named
-`terraform-provider-keel`.
-
-If the GitHub UI still shows `keelapi/keel-terraform`, rename the repository to
-`keelapi/terraform-provider-keel` before publishing. The local `origin` remote
-already points at `https://github.com/keelapi/terraform-provider-keel.git`.
+`terraform-provider-keel`; `keelapi/terraform-provider-keel` meets both.
 
 Create or confirm the `keelapi` Registry namespace before submitting the
 provider listing.
@@ -146,18 +155,26 @@ Open `https://registry.terraform.io/publish/provider`.
 Publishing creates the provider listing and a GitHub release webhook. Future
 GitHub releases are detected by the Registry automatically.
 
-## 6. Cut the next release tag
+## 6. Cutting a release
 
-After the signing key, GitHub secrets, Registry public key, namespace, and
-provider listing are ready, cut the next SemVer tag. The previous source release
-is v1.0, so the expected first Registry ingestion tag is likely `v1.0.1` unless
-the release plan chooses another bump.
+Before tagging, on the commit to release:
+
+1. Move the `## Unreleased` entries in `CHANGELOG.md` under a
+   `## MAJOR.MINOR.PATCH (YYYY-MM-DD)` heading. Use a minor version for schema
+   additions or new provider arguments and a major version for removals.
+2. Set `VERSION` in `GNUmakefile` to the release version, and update version
+   constraints in `README.md` and `examples/` when the release adds features
+   they use.
+3. Run `make test`, `go vet ./...`, and `make generate-docs`; commit any
+   regenerated `docs/` so the Registry documentation matches the schema.
+
+Then cut the SemVer tag:
 
 ```sh
 git fetch --tags origin
 git tag --list 'v1*'
-git tag v1.0.1
-git push origin v1.0.1
+git tag vMAJOR.MINOR.PATCH
+git push origin vMAJOR.MINOR.PATCH
 ```
 
 The release workflow will create the GitHub Release with:

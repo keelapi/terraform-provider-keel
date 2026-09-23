@@ -1,16 +1,23 @@
 ---
 page_title: "Keel Provider"
 description: |-
-  The Keel provider manages API-key-backed Keel governance resources.
+  The Keel provider manages Keel API keys and organization membership, and reads permits.
 ---
 
 # Keel Provider
 
-Keel sits between your application and AI providers to govern requests before they reach model infrastructure. It evaluates identity, policy, budget, and operational constraints; decides whether a request is allowed, denied, or constrained; executes only permitted provider calls; and records usage, cost, and governance events.
+Keel sits between your application and AI providers to govern requests before they reach model infrastructure. It evaluates identity, policy, budget, and operational constraints; decides whether a request is allowed, denied, held for review, or throttled; executes only permitted provider calls; and records usage, cost, and governance events.
 
 ## Surface Position
 
-The OpenAPI specification is the canonical integration contract for Keel surfaces. Terraform is Keel's policy-as-code surface for managing governance resources, while first-class runtime SDKs serve application code. Use this provider for infrastructure-owned Keel configuration that benefits from review, drift detection, and repeatable rollout.
+The OpenAPI specification is the canonical integration contract for Keel surfaces. This provider manages a minimal set of Keel governance resources (API keys and organization membership) and reads permits; it does not manage Keel policies. First-class runtime SDKs serve application code. Use this provider for infrastructure-owned Keel configuration that benefits from review, drift detection, and repeatable rollout.
+
+## Authentication
+
+Set at least one credential. Each resource uses the credential its Keel routes accept, so one provider block can hold both:
+
+- `api_key` (or `KEEL_API_KEY`): a Keel API key, used by `keel_api_key` (admin scope required) and `keel_permit` (admin or client scope). Both act on the project of the API key.
+- `user_token` (or `KEEL_USER_TOKEN`): a Keel user access token for an owner or admin of the organization, used only by `keel_organization_member`. Keel's organization member routes do not accept API keys. User tokens are short-lived (a Keel dashboard session token expires after 30 minutes), so pass a fresh one through `KEEL_USER_TOKEN` for each run rather than storing it in configuration.
 
 ## Example Usage
 
@@ -27,6 +34,10 @@ terraform {
 provider "keel" {
   base_url = "https://api.keelapi.com" # or KEEL_BASE_URL env var
   api_key  = var.keel_api_key          # or KEEL_API_KEY env var
+
+  # keel_organization_member needs a user token instead of the API key. User
+  # tokens are short-lived: set KEEL_USER_TOKEN for each run rather than
+  # user_token here.
 }
 
 variable "keel_api_key" {
@@ -40,5 +51,6 @@ variable "keel_api_key" {
 
 ### Optional
 
-- `api_key` (String, Sensitive) Keel API key. Can also be set via KEEL_API_KEY env var.
+- `api_key` (String, Sensitive) Keel API key, used by keel_api_key (admin scope required) and keel_permit (admin or client scope). Can also be set via KEEL_API_KEY env var.
 - `base_url` (String) Keel API base URL. Can also be set via KEEL_BASE_URL env var.
+- `user_token` (String, Sensitive) Keel user access token, used only by keel_organization_member: Keel's organization member routes accept a signed-in user's credential, not an API key. The user must be an owner or admin of the organization. User tokens are short-lived (a Keel dashboard session token expires after 30 minutes), so supply a fresh one for each run, typically through the KEEL_USER_TOKEN env var.
