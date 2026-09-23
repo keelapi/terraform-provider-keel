@@ -23,6 +23,17 @@ func TestProviderSchema(t *testing.T) {
 	_ = testAccProtoV6ProviderFactories
 }
 
+func TestProviderMetadataReportsBuildVersion(t *testing.T) {
+	var resp fwprovider.MetadataResponse
+	provider.New("1.1.0")().Metadata(context.Background(), fwprovider.MetadataRequest{}, &resp)
+	if resp.Version != "1.1.0" {
+		t.Fatalf("Version = %q, want the version passed to New", resp.Version)
+	}
+	if resp.TypeName != "keel" {
+		t.Fatalf("TypeName = %q, want keel", resp.TypeName)
+	}
+}
+
 func TestProviderV1MinimalSurface(t *testing.T) {
 	p := provider.New("test")()
 
