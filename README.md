@@ -1,6 +1,6 @@
 # keel-terraform
 
-The official Terraform provider for [Keel](https://keelapi.com) — a permit-first AI governance and execution control plane.
+The official Terraform provider for [Keel](https://keelapi.com) — agent control infrastructure for authorizing supported actions and recording evidence.
 
 Keel sits between your application and AI providers (OpenAI, Anthropic, Google, xAI, Meta).
 
