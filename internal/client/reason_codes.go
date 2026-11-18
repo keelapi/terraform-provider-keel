@@ -7,6 +7,8 @@ package client
 const (
 	// Budget-driven denials and throttles.
 	ReasonBudgetRequestCapExceeded    = "budget.request_cap_exceeded"
+	ReasonBudgetMinuteCapExceeded     = "budget.minute_cap_exceeded"
+	ReasonBudgetHourlyCapExceeded     = "budget.hourly_cap_exceeded"
 	ReasonBudgetDailyCapExceeded      = "budget.daily_cap_exceeded"
 	ReasonBudgetWeeklyCapExceeded     = "budget.weekly_cap_exceeded"
 	ReasonBudgetMonthlyCapExceeded    = "budget.monthly_cap_exceeded"
@@ -51,6 +53,8 @@ const (
 // AllReasonCodes lists every reason-code constant above.
 var AllReasonCodes = []string{
 	ReasonBudgetRequestCapExceeded,
+	ReasonBudgetMinuteCapExceeded,
+	ReasonBudgetHourlyCapExceeded,
 	ReasonBudgetDailyCapExceeded,
 	ReasonBudgetWeeklyCapExceeded,
 	ReasonBudgetMonthlyCapExceeded,

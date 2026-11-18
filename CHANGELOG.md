@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Reason-code constants `ReasonBudgetMinuteCapExceeded`
+  (`budget.minute_cap_exceeded`) and `ReasonBudgetHourlyCapExceeded`
+  (`budget.hourly_cap_exceeded`), for the Keel API's minute and hourly spend
+  caps (`deny_if_cost_exceeds` windows `minute` and `hourly`).
+
 ## 1.1.0 (2026-09-23)
 
 This release makes the provider work end to end against the current Keel API.
