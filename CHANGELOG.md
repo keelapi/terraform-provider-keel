@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-11-20)
+
+Adds reason-code constants for codes the Keel API returns as of
+2026-11-20. No resource, data source or schema changes.
 
 ### Added
 
