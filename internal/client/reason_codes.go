@@ -26,6 +26,12 @@ const (
 	ReasonPolicyModelNotAllowed = "policy.model_not_allowed"
 	ReasonPolicyRuleDenied      = "policy.rule_denied"
 	ReasonPolicyReviewRequired  = "policy.review_required"
+	// ReasonPolicyProjectPolicyMissing: no project policy can evaluate the
+	// request. An onboarding precondition, not a denial by an evaluated rule.
+	ReasonPolicyProjectPolicyMissing = "policy.project_policy_missing"
+	// ReasonPolicyRuleAllowed: an allow rule in a project policy matched and
+	// granted the request.
+	ReasonPolicyRuleAllowed = "policy.rule_allowed"
 	// ReasonPolicyExplicitAuthorizationRequired: a consequential action had
 	// no applicable positive authorization (a "missing grant" deny).
 	ReasonPolicyExplicitAuthorizationRequired = "policy.explicit_authorization_required"
@@ -70,6 +76,8 @@ var AllReasonCodes = []string{
 	ReasonPolicyModelNotAllowed,
 	ReasonPolicyRuleDenied,
 	ReasonPolicyReviewRequired,
+	ReasonPolicyProjectPolicyMissing,
+	ReasonPolicyRuleAllowed,
 	ReasonPolicyExplicitAuthorizationRequired,
 	ReasonActionClassNotPermitted,
 	ReasonWorkflowIntentDeclarationExceedsBudgetCap,

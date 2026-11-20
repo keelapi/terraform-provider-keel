@@ -26,6 +26,8 @@ var keelReasonCodes = []string{
 	"policy.model_not_allowed",
 	"policy.rule_denied",
 	"policy.review_required",
+	"policy.project_policy_missing",
+	"policy.rule_allowed",
 	"action_class.not_permitted",
 	"workflow_intent.declaration_exceeds_budget_cap",
 	"workflow_intent.max_calls_exceeded",
