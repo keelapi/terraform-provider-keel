@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Reason-code constants `ReasonBudgetMinuteCapExceeded`
+  (`budget.minute_cap_exceeded`) and `ReasonBudgetHourlyCapExceeded`
+  (`budget.hourly_cap_exceeded`), for the Keel API's minute and hourly spend
+  caps (`deny_if_cost_exceeds` windows `minute` and `hourly`).
+- Reason-code constants `ReasonPolicyProjectPolicyMissing`
+  (`policy.project_policy_missing`: no project policy can evaluate the request,
+  an onboarding precondition rather than a rule denial) and
+  `ReasonPolicyRuleAllowed` (`policy.rule_allowed`: an allow rule matched and
+  granted the request). The API already returns both.
+
 ## 1.1.0 (2026-09-23)
 
 This release makes the provider work end to end against the current Keel API.

@@ -6,9 +6,11 @@ import (
 )
 
 // keelReasonCodes is the reason-code lexicon the Keel API emits on permit
-// decisions (27 codes), plus the positive-authority deny code.
+// decisions (29 codes), plus the positive-authority deny code.
 var keelReasonCodes = []string{
 	"budget.request_cap_exceeded",
+	"budget.minute_cap_exceeded",
+	"budget.hourly_cap_exceeded",
 	"budget.daily_cap_exceeded",
 	"budget.weekly_cap_exceeded",
 	"budget.monthly_cap_exceeded",
@@ -24,6 +26,8 @@ var keelReasonCodes = []string{
 	"policy.model_not_allowed",
 	"policy.rule_denied",
 	"policy.review_required",
+	"policy.project_policy_missing",
+	"policy.rule_allowed",
 	"action_class.not_permitted",
 	"workflow_intent.declaration_exceeds_budget_cap",
 	"workflow_intent.max_calls_exceeded",
